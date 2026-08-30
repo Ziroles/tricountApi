@@ -10,9 +10,14 @@ Deux conséquences assumées, inchangées :
  - les points d'entrée peuvent disparaître sans préavis, et toute erreur doit
    se traduire par un échec propre, jamais par une dépense à moitié créée.
 
-Aucune clé applicative n'est nécessaire : le client génère au premier appel une
-paire de clés et un identifiant d'appareil, puis les réutilise. Rejoindre un
-tricount ne demande que son code de partage.
+Aucune clé applicative n'est nécessaire côté Tricount : le client génère au
+premier appel une paire de clés et un identifiant d'appareil, puis les
+réutilise. Rejoindre un tricount ne demande que son code de partage.
+
+Le relais lui-même est protégé par une clef statique de 32 caractères,
+`TRICOUNT_RELAY_KEY`, que l'appelant présente à chaque requête. Il n'écoute que
+la boucle locale, mais tout programme de la machine peut l'atteindre : la clef
+distingue l'appelant légitime, sans session ni compte à gérer.
 
 Le relais est un serveur HTTP autonome, sans cadriciel ni plateforme :
 `python3 api/relay.py`, lancé automatiquement par `npm run dev`.
@@ -23,9 +28,11 @@ script en tête de `sys.path`, où il masquerait la librairie qu'il importe.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
+import secrets
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -44,6 +51,11 @@ CREDENTIALS_PATH = Path(
     or Path(__file__).resolve().parent.parent / ".tricount-credentials.json"
 )
 
+# Clef d'accès au relais : longueur fixe, comparée telle quelle. Trente-deux
+# caractères tirés au hasard suffisent largement face à un appelant local.
+RELAY_KEY_LENGTH = 32
+RELAY_KEY = (os.environ.get("TRICOUNT_RELAY_KEY") or "").strip()
+
 _lock = threading.Lock()
 _client: TricountAPI | None = None
 
@@ -55,6 +67,26 @@ class RelayError(Exception):
         super().__init__(reason)
         self.reason = reason
         self.status = status
+
+
+def presented_key(headers: Any) -> str:
+    """Clef portée par la requête : « authorization: Bearer … » ou « x-api-key »."""
+    scheme, _, value = (headers.get("authorization") or "").partition(" ")
+    if scheme.lower() == "bearer" and value.strip():
+        return value.strip()
+    return (headers.get("x-api-key") or "").strip()
+
+
+def check_key(presented: str) -> None:
+    """
+    Vérifie la clef présentée. Le relais refuse de servir tant qu'aucune clef
+    correcte n'est configurée : mieux vaut un service muet qu'un service ouvert.
+    La comparaison est à temps constant, par principe.
+    """
+    if len(RELAY_KEY) != RELAY_KEY_LENGTH:
+        raise RelayError("Relais non configuré : clef d'accès absente.", 503)
+    if not hmac.compare_digest(presented, RELAY_KEY):
+        raise RelayError("Clef d'accès invalide.", 401)
 
 
 def get_client() -> TricountAPI:
@@ -180,8 +212,16 @@ class RelayHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802 — nom imposé par BaseHTTPRequestHandler
+        # Le corps est lu dans tous les cas : la requête doit être consommée
+        # entièrement avant la réponse, refus compris.
         length = int(self.headers.get("content-length") or 0)
-        status, payload = handle(self.rfile.read(length))
+        raw = self.rfile.read(length)
+        try:
+            check_key(presented_key(self.headers))
+        except RelayError as error:
+            self._send(error.status, {"ok": False, "reason": error.reason})
+            return
+        status, payload = handle(raw)
         self._send(status, payload)
 
     def do_GET(self) -> None:  # noqa: N802
@@ -193,7 +233,14 @@ class RelayHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    host = os.environ.get("TRICOUNT_RELAY_HOST", "0.0.0.0")
+    if len(RELAY_KEY) != RELAY_KEY_LENGTH:
+        # Rien ne serait servi de toute façon : autant le dire au démarrage, et
+        # proposer une clef valable plutôt que de laisser en inventer une.
+        raise SystemExit(
+            f"[tricount] TRICOUNT_RELAY_KEY doit faire {RELAY_KEY_LENGTH} caractères.\n"
+            f"[tricount] par exemple : TRICOUNT_RELAY_KEY={secrets.token_urlsafe(24)[:RELAY_KEY_LENGTH]}"
+        )
+
     port = int(os.environ.get("TRICOUNT_RELAY_PORT") or 8787)
     print(f"[tricount] relais local sur http://{host}:{port}", flush=True)
     HTTPServer((host, port), RelayHandler).serve_forever()
