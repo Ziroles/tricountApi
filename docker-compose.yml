@@ -1,0 +1,14 @@
+services:
+  tricount-api:
+    build: .
+    container_name: tricount-api
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - tricount-data:/data
+    environment:
+      - TRICOUNT_RELAY_PORT=8787
+
+volumes:
+  tricount-data:

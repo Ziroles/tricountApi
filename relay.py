@@ -193,6 +193,7 @@ class RelayHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    host = os.environ.get("TRICOUNT_RELAY_HOST", "0.0.0.0")
     port = int(os.environ.get("TRICOUNT_RELAY_PORT") or 8787)
-    print(f"[tricount] relais local sur http://127.0.0.1:{port}", flush=True)
-    HTTPServer(("127.0.0.1", port), RelayHandler).serve_forever()
+    print(f"[tricount] relais local sur http://{host}:{port}", flush=True)
+    HTTPServer((host, port), RelayHandler).serve_forever()
