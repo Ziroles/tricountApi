@@ -202,14 +202,37 @@ def handle(raw: bytes) -> tuple[int, dict[str, Any]]:
 class RelayHandler(BaseHTTPRequestHandler):
     """Transport HTTP : décode la requête, délègue à `handle`, répond."""
 
+    def _send_cors_headers(self) -> None:
+        origin = self.headers.get("origin") or "*"
+        self.send_header("access-control-allow-origin", origin)
+        self.send_header("access-control-allow-methods", "POST, OPTIONS, GET")
+        req_headers = self.headers.get("access-control-request-headers")
+        if req_headers:
+            self.send_header("access-control-allow-headers", req_headers)
+        else:
+            self.send_header(
+                "access-control-allow-headers",
+                "authorization, content-type, x-api-key, accept, origin",
+            )
+        if origin != "*":
+            self.send_header("access-control-allow-credentials", "true")
+        self.send_header("access-control-max-age", "86400")
+
     def _send(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
+        self._send_cors_headers()
         self.send_header("content-type", "application/json")
         self.send_header("cache-control", "no-store")
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        self.send_response(204)
+        self._send_cors_headers()
+        self.send_header("content-length", "0")
+        self.end_headers()
 
     def do_POST(self) -> None:  # noqa: N802 — nom imposé par BaseHTTPRequestHandler
         # Le corps est lu dans tous les cas : la requête doit être consommée
