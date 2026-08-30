@@ -241,6 +241,7 @@ if __name__ == "__main__":
             f"[tricount] par exemple : TRICOUNT_RELAY_KEY={secrets.token_urlsafe(24)[:RELAY_KEY_LENGTH]}"
         )
 
-    port = int(os.environ.get("TRICOUNT_RELAY_PORT") or 8787)
+    host = os.environ.get("TRICOUNT_RELAY_HOST") or "localhost"
+    port = int(os.environ.get("TRICOUNT_RELAY_PORT") or "8787")
     print(f"[tricount] relais local sur http://{host}:{port}", flush=True)
     HTTPServer((host, port), RelayHandler).serve_forever()
