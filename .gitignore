@@ -1,1 +1,20 @@
-__pycache__
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Local configuration & secrets
+.env
+.env.local
+.tricount-credentials.json
+
+# Docker local data directory
+data/
+
+# OS files
+.DS_Store
+Thumbs.db

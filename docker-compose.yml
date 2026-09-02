@@ -4,11 +4,14 @@ services:
     container_name: tricount-api
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "${TRICOUNT_RELAY_PORT:-8787}:8787"
     volumes:
       - tricount-data:/data
     environment:
+      - TRICOUNT_RELAY_HOST=0.0.0.0
       - TRICOUNT_RELAY_PORT=8787
+      - TRICOUNT_RELAY_KEY=${TRICOUNT_RELAY_KEY:-}
+
 
 volumes:
   tricount-data:
