@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # Une nouvelle poussée annule la vérification de la précédente : ce qui compte
+  # est l'état de la branche maintenant, pas l'historique de ses états.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Installer les dépendances
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests
+        # Tricount et Gemini sont simulés : rien n'appelle le réseau, et aucune
+        # dépense réelle n'est créée.
+        run: pytest -q
+
+  image:
+    name: Image Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construire l'image
+        run: docker build -t splitticket-api:ci .
+
+      - name: Vérifier que le service démarre et répond
+        run: |
+          docker run -d --name ci-api -p 8787:8787 \
+            -e SPLITTICKET_SECRET_KEY=clef-de-verification-ci \
+            splitticket-api:ci
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8787/health > /dev/null; then
+              curl -s http://127.0.0.1:8787/health
+              echo
+              docker rm -f ci-api > /dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Le service n'a pas répondu en 30 s :"
+          docker logs ci-api
+          docker rm -f ci-api > /dev/null
+          exit 1
