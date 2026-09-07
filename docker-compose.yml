@@ -11,7 +11,15 @@ services:
       - TRICOUNT_RELAY_HOST=0.0.0.0
       - TRICOUNT_RELAY_PORT=8787
       - TRICOUNT_RELAY_KEY=${TRICOUNT_RELAY_KEY:-}
+    networks:
+      - splitticket
 
+networks:
+  # Réseau partagé avec le front (projet triCountHelper) : c'est lui qui donne
+  # à nginx un nom « tricount-api » à résoudre. Nom fixe, pour qu'il ne dépende
+  # pas du nom du dossier du projet Compose.
+  splitticket:
+    name: splitticket
 
 volumes:
   tricount-data:
