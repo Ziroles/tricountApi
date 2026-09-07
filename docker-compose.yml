@@ -1,12 +1,14 @@
 services:
-  tricount-api:
+  splitticket-api:
     build: .
-    container_name: tricount-api
+    container_name: splitticket-api
     restart: unless-stopped
     ports:
-      - "${TRICOUNT_RELAY_PORT:-8787}:8787"
+      - "${SPLITTICKET_PORT:-8787}:8787"
     volumes:
-      - tricount-data:/data
+      # SQLite database, receipt photos, Tricount device credentials.
+      # Losing this volume means losing the groups and the receipts.
+      - splitticket-data:/data
     environment:
       - TRICOUNT_RELAY_HOST=0.0.0.0
       - TRICOUNT_RELAY_PORT=8787
@@ -22,4 +24,4 @@ networks:
     name: splitticket
 
 volumes:
-  tricount-data:
+  splitticket-data:
