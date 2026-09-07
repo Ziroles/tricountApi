@@ -1,16 +1,16 @@
 """
-Identité : appareils, comptes optionnels, et la notion de « propriétaire ».
+Identity: devices, optional accounts, and the notion of an "owner".
 
-Le modèle tient en une phrase : **un appareil est une identité suffisante**.
-Il s'enrôle seul au premier lancement et reçoit un jeton porté ; aucun mot de
-passe n'est requis pour se servir de l'application.
+The model fits in one sentence: **a device is identity enough**. It enrols itself
+on first launch and receives a bearer token; no password is required to use the
+application.
 
-Un compte est *optionnel*, et ne sert qu'à une chose : retrouver ses groupes
-depuis un second appareil. Rattacher un appareil à un compte fait basculer ses
-accès vers le compte — c'est ce que résout `owner_of`.
+An account is *optional*, and serves one purpose only: finding your groups again
+from a second device. Attaching a device to an account moves its access over to
+the account — that is what `owner_of` resolves.
 
-    appareil sans compte  → propriétaire = ('device',  <id appareil>)
-    appareil avec compte  → propriétaire = ('account', <id compte>)
+    device without account  → owner = ('device',  <device id>)
+    device with account     → owner = ('account', <account id>)
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def new_id() -> str:
 
 @dataclass(frozen=True)
 class Owner:
-    """À qui appartiennent les groupes : un compte s'il existe, l'appareil sinon."""
+    """Who the groups belong to: the account if there is one, the device otherwise."""
 
     type: str
     id: str
@@ -51,7 +51,7 @@ class Owner:
         return (self.type, self.id)
 
 
-# ── Mots de passe (comptes optionnels) ────────────────────────────────────────
+# ── Passwords (optional accounts) ─────────────────────────────────────────────
 
 
 def hash_password(password: str) -> str:
@@ -73,26 +73,26 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(candidate.hex(), digest_hex)
 
 
-# ── Enrôlement ────────────────────────────────────────────────────────────────
+# ── Enrolment ─────────────────────────────────────────────────────────────────
 
 
 def check_signup_key(presented: str | None) -> None:
     """
-    Vérifie la clef d'instance, quand il y en a une. Elle ne garde que
-    l'enrôlement : une instance publique se ferme ainsi sans écrire d'auth.
-    Comparaison à temps constant, par principe.
+    Check the instance key, when there is one. It only guards enrolment: this is
+    how a public instance is closed off without writing any auth. Constant-time
+    comparison, on principle.
     """
     if config.SIGNUP_KEY == "":
         return
     if presented is None or not hmac.compare_digest(presented.strip(), config.SIGNUP_KEY):
         raise HTTPException(
             status_code=401,
-            detail={"code": "signup_key_invalid", "reason": "Clef d'instance invalide."},
+            detail={"code": "signup_key_invalid", "reason": "Invalid instance key."},
         )
 
 
 def enrol_device() -> tuple[str, str]:
-    """Crée un appareil et renvoie (identifiant, jeton en clair — la seule fois)."""
+    """Create a device and return (id, plaintext token — the only time it is shown)."""
     device_id = new_id()
     token = secrets.token_urlsafe(TOKEN_BYTES)
     stamp = now()
@@ -104,7 +104,7 @@ def enrol_device() -> tuple[str, str]:
     return device_id, token
 
 
-# ── Résolution du porteur ─────────────────────────────────────────────────────
+# ── Bearer resolution ─────────────────────────────────────────────────────────
 
 
 def _bearer(authorization: str | None) -> str | None:
@@ -118,16 +118,16 @@ def _bearer(authorization: str | None) -> str | None:
 
 def current_owner(authorization: str | None = Header(default=None)) -> Owner:
     """
-    Dépendance FastAPI : jeton porté → propriétaire, ou 401.
+    FastAPI dependency: bearer token → owner, or 401.
 
-    Le jeton est comparé par empreinte : la base ne contient jamais de quoi se
-    faire passer pour un appareil.
+    The token is compared by hash: the database never holds anything that would
+    let someone impersonate a device.
     """
     token = _bearer(authorization)
     if token is None:
         raise HTTPException(
             status_code=401,
-            detail={"code": "unauthenticated", "reason": "Jeton d'appareil absent."},
+            detail={"code": "unauthenticated", "reason": "Missing device token."},
         )
 
     row = db.query_one(
@@ -136,7 +136,7 @@ def current_owner(authorization: str | None = Header(default=None)) -> Owner:
     if row is None:
         raise HTTPException(
             status_code=401,
-            detail={"code": "unauthenticated", "reason": "Appareil inconnu. Réenrôlez-le."},
+            detail={"code": "unauthenticated", "reason": "Unknown device. Enrol it again."},
         )
 
     db.execute("UPDATE device SET last_seen_at = ? WHERE id = ?", (now(), row["id"]))

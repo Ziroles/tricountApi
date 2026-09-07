@@ -1,11 +1,11 @@
 """
-Point d'entrée de l'API SplitTicket.
+Entry point of the SplitTicket API.
 
     uvicorn app.main:app --host 0.0.0.0 --port 8787
 
-Le service porte désormais quatre choses que le client faisait, ou ne faisait
-pas du tout : la lecture OCR des tickets, les groupes adossés à Tricount, le
-stockage partagé des tickets, et l'envoi de la dépense.
+The service now carries four things the client used to do, or did not do at all:
+OCR reading of receipts, groups backed by Tricount, shared storage of receipts,
+and pushing the expense.
 """
 
 from __future__ import annotations
@@ -32,23 +32,23 @@ logger = logging.getLogger("splitticket")
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """
-    Prépare la base au démarrage, et dit tout de suite ce que l'instance ne
-    saura pas faire. Une capacité manquante doit se voir au lancement, pas se
-    découvrir au premier utilisateur qui bute dessus.
+    Prepare the database at startup, and say right away what this instance will
+    not be able to do. A missing capability must be visible at launch, not
+    discovered by the first user who runs into it.
     """
     config.ensure_directories()
     db.connect()
     if config.SECRET_KEY == "":
         logger.warning(
-            "SPLITTICKET_SECRET_KEY absente : les utilisateurs ne pourront pas enregistrer "
-            "leur clé Gemini (on refuse de l'écrire en clair)."
+            "SPLITTICKET_SECRET_KEY is missing: users will not be able to save their "
+            "Gemini key (we refuse to write it in the clear)."
         )
     if config.GEMINI_API_KEY == "":
-        logger.info("Aucune clé Gemini d'instance : chaque utilisateur apportera la sienne.")
+        logger.info("No instance Gemini key: every user will bring their own.")
     if config.SIGNUP_KEY == "":
-        logger.warning("SPLITTICKET_SIGNUP_KEY absente : l'enrôlement d'appareil est ouvert.")
+        logger.warning("SPLITTICKET_SIGNUP_KEY is missing: device enrolment is open.")
 
-    # L'entretien tourne en tâche de fond, et s'arrête avec le service.
+    # Housekeeping runs in the background, and stops with the service.
     housekeeping = asyncio.create_task(maintenance.run_periodically())
     try:
         yield
@@ -61,13 +61,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="SplitTicket API",
     version="1.0.0",
-    description="Lecture de tickets, groupes Tricount et répartition partagée.",
+    description="Receipt reading, Tricount groups and shared splitting.",
     lifespan=lifespan,
 )
 
-# L'authentification est un jeton porté, pas un cookie : il n'y a pas de CSRF à
-# craindre, et `allow_credentials` resterait sans objet. On ne l'active donc pas,
-# ce qui laisse « * » utilisable pour un déploiement personnel.
+# Authentication is a bearer token, not a cookie: there is no CSRF to worry
+# about, and `allow_credentials` would be pointless. We therefore leave it off,
+# which keeps "*" usable for a personal deployment.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.ALLOWED_ORIGINS,
@@ -85,14 +85,13 @@ app.include_router(receipts.router)
 @app.exception_handler(Exception)
 def unhandled(request: Request, error: Exception) -> JSONResponse:
     """
-    Filet de sécurité : le détail reste dans le journal du serveur, l'appelant
-    reçoit un message utilisable. Une trace de pile n'a jamais aidé personne à
-    répartir un ticket.
+    Safety net: the detail stays in the server log, the caller gets a usable
+    message. A stack trace has never helped anyone split a receipt.
     """
-    logger.exception("erreur non gérée sur %s %s", request.method, request.url.path)
+    logger.exception("unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
-        content={"code": "internal_error", "reason": "Une erreur inattendue est survenue."},
+        content={"code": "internal_error", "reason": "An unexpected error occurred."},
     )
 
 

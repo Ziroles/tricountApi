@@ -18,12 +18,12 @@ data/
 # OS files
 .DS_Store
 Thumbs.db
-# Base et photos en développement local
+# Local development database and photos
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
 images/
 
-# Caches d'outils
+# Tool caches
 .pytest_cache/
 .ruff_cache/

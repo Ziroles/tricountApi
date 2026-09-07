@@ -1,18 +1,18 @@
 """
-Appel du modèle de vision.
+Calling the vision model.
 
-Portage de la partie « réseau » de `src/extraction/gemini.ts`. Deux traits de
-l'original sont conservés parce qu'ils règlent de vrais problèmes :
+A port of the "network" part of `src/extraction/gemini.ts`. Two traits of the
+original are kept because they solve real problems:
 
- - **Le sondage des capacités.** Les modèles Gemini n'acceptent pas tous
-   `responseJsonSchema` ni `thinkingConfig`, et refusent en 400 sans le dire
-   clairement. On essaie les combinaisons dans l'ordre du moins cher au plus
-   tolérant, puis on retient celle qui a marché pour ce modèle.
- - **`thinkingBudget: 0`.** Lire un ticket ne demande pas de réflexion en
-   chaîne ; la désactiver coupe plusieurs secondes de latence.
+ - **Capability probing.** Not all Gemini models accept `responseJsonSchema` or
+   `thinkingConfig`, and they refuse with a 400 without saying so clearly. We try
+   the combinations from cheapest to most tolerant, then remember the one that
+   worked for that model.
+ - **`thinkingBudget: 0`.** Reading a receipt does not require chain-of-thought;
+   disabling it cuts several seconds of latency.
 
-Les messages d'erreur sont en français et destinés à l'utilisateur : ils
-traversent l'API telle quelle jusqu'à l'écran de lecture.
+The error messages are written for the user: they travel through the API as-is
+all the way to the scanning screen.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ logger = logging.getLogger("splitticket.gemini")
 
 
 class ExtractionError(Exception):
-    """Échec de lecture, déjà formulé pour l'utilisateur."""
+    """Scan failure, already phrased for the user."""
 
     def __init__(self, reason: str, retryable: bool, code: str = "extraction_failed") -> None:
         super().__init__(reason)
@@ -49,8 +49,8 @@ class ModelCaps:
     thinking_config: bool
 
 
-# Du plus souhaitable au plus tolérant : sortie structurée d'abord, réflexion
-# désactivée d'abord.
+# From most desirable to most tolerant: structured output first, thinking
+# disabled first.
 CAPS_PROBE_ORDER: tuple[ModelCaps, ...] = (
     ModelCaps(structured=True, thinking_config=False),
     ModelCaps(structured=False, thinking_config=False),
@@ -67,16 +67,16 @@ def clear_caps_cache() -> None:
 
 def message_for_status(status: int) -> str:
     if status == 400:
-        return "Requête refusée. Vérifiez la clé API et le nom du modèle dans les réglages."
+        return "Request refused. Check the API key and the model name in the settings."
     if status in (401, 403):
-        return "La clé API a été refusée. Vérifiez-la dans les réglages."
+        return "The API key was refused. Check it in the settings."
     if status == 404:
-        return "Ce modèle est introuvable. Vérifiez son nom dans les réglages."
+        return "This model cannot be found. Check its name in the settings."
     if status == 429:
-        return "Quota atteint. Réessayez dans un moment."
+        return "Quota reached. Try again in a moment."
     if status >= 500:
-        return "Le service est momentanément indisponible."
-    return "La lecture n'a pas abouti."
+        return "The service is temporarily unavailable."
+    return "The scan did not succeed."
 
 
 def _status_of(error: Exception) -> int | None:
@@ -89,9 +89,9 @@ def _status_of(error: Exception) -> int | None:
 
 def _is_retryable_400(error: Exception) -> bool:
     """
-    Un 400 causé par une capacité non supportée mérite un nouvel essai avec
-    d'autres options ; un 400 causé par la clef, non — réessayer ne ferait que
-    répéter le refus.
+    A 400 caused by an unsupported capability deserves another try with other
+    options; a 400 caused by the key does not — retrying would only repeat the
+    refusal.
     """
     if _status_of(error) != 400:
         return False
@@ -108,7 +108,7 @@ def _wrap(error: Exception) -> ExtractionError:
             f"{base} {detail}".strip() if detail else base, retryable=status >= 500
         )
     return ExtractionError(
-        "Le service de lecture n'a pas pu être joint.", retryable=True
+        "The scanning service could not be reached.", retryable=True
     )
 
 
@@ -123,10 +123,10 @@ def _config(caps: ModelCaps) -> genai_types.GenerateContentConfig:
 
 
 def extract(image: bytes, mime_type: str, api_key: str, model: str) -> ExtractionResult:
-    """Photo de ticket → extraction assainie. Lève `ExtractionError` en cas d'échec."""
+    """Receipt photo → sanitised extraction. Raises `ExtractionError` on failure."""
     if api_key.strip() == "":
         raise ExtractionError(
-            "Aucune clé Gemini n'est disponible. Renseignez la vôtre dans les réglages.",
+            "No Gemini key is available. Enter your own in the settings.",
             retryable=False,
             code="no_gemini_key",
         )
@@ -156,9 +156,9 @@ def extract(image: bytes, mime_type: str, api_key: str, model: str) -> Extractio
     if cached is not None:
         try:
             text = attempt(cached)
-        except Exception as error:  # noqa: BLE001 — on retente ou on convertit
+        except Exception as error:  # noqa: BLE001 — we either retry or convert
             if _is_retryable_400(error):
-                logger.info("capacités périmées pour %s, nouveau sondage", model)
+                logger.info("stale capabilities for %s, probing again", model)
                 _caps_cache.pop(model, None)
             else:
                 raise _wrap(error) from error
@@ -175,37 +175,37 @@ def extract(image: bytes, mime_type: str, api_key: str, model: str) -> Extractio
                 if not _is_retryable_400(error):
                     break
         if text is None:
-            raise _wrap(last_error or RuntimeError("aucune tentative"))
+            raise _wrap(last_error or RuntimeError("no attempt made"))
 
     if text.strip() == "":
-        raise ExtractionError("Le ticket n'a pas pu être lu sur cette photo.", retryable=True)
+        raise ExtractionError("The receipt could not be read from this photo.", retryable=True)
 
     try:
         parsed = json.loads(text)
     except ValueError:
-        # Certains modèles encadrent le JSON d'une clôture Markdown malgré la
-        # consigne : on tente de le dégager avant d'abandonner.
+        # Some models wrap the JSON in a Markdown fence despite the instruction:
+        # we try to strip it before giving up.
         stripped = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
         try:
             parsed = json.loads(stripped)
         except ValueError as error:
             raise ExtractionError(
-                "La réponse du service était inexploitable.", retryable=True
+                "The service's response was unusable.", retryable=True
             ) from error
 
     return normalize_extraction(parsed)
 
 
-# ── Liste des modèles ─────────────────────────────────────────────────────────
+# ── Listing models ────────────────────────────────────────────────────────────
 
 MULTIMODAL_PREFIXES = ("gemini-1.5", "gemini-2", "gemini-3", "gemini-flash", "gemini-pro")
 
 
 def list_models(api_key: str) -> list[dict[str, str]]:
-    """Modèles utilisables pour lire un ticket, avec la clef fournie."""
+    """Models usable to read a receipt, with the key provided."""
     if api_key.strip() == "":
         raise ExtractionError(
-            "Aucune clé Gemini n'est disponible.", retryable=False, code="no_gemini_key"
+            "No Gemini key is available.", retryable=False, code="no_gemini_key"
         )
     try:
         client = genai.Client(api_key=api_key.strip())

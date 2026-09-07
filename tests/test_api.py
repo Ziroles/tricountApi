@@ -1,10 +1,10 @@
 """
-Tests des routes.
+Route tests.
 
-Trois propriétés méritent d'être tenues par des tests plutôt que par la
-vigilance : **la portée** (un appareil ne voit jamais le groupe d'un autre), **la
-concurrence** (deux éditions simultanées ne s'écrasent pas en silence), et **le
-secret** (une clef Gemini enregistrée ne ressort jamais entière).
+Three properties deserve to be held by tests rather than by vigilance: **scope**
+(a device never sees another one's group), **concurrency** (two simultaneous
+edits do not overwrite each other silently), and **secrecy** (a saved Gemini key
+never comes back out in full).
 """
 
 from __future__ import annotations
@@ -14,26 +14,26 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 
-# ── Identité ──────────────────────────────────────────────────────────────────
+# ── Identity ──────────────────────────────────────────────────────────────────
 
 
-def test_un_appareil_s_enrole_sans_rien_demander(client: TestClient) -> None:
+def test_a_device_enrols_without_asking_for_anything(client: TestClient) -> None:
     response = client.post("/v1/devices")
     assert response.status_code == 201
     assert response.json()["token"]
 
 
-def test_sans_jeton_rien_n_est_accessible(client: TestClient) -> None:
+def test_nothing_is_reachable_without_a_token(client: TestClient) -> None:
     assert client.get("/v1/groups").status_code == 401
     assert client.get("/v1/me").status_code == 401
 
 
-def test_un_jeton_inventé_est_refusé(client: TestClient) -> None:
-    response = client.get("/v1/me", headers={"authorization": "Bearer nimportequoi"})
+def test_a_made_up_token_is_refused(client: TestClient) -> None:
+    response = client.get("/v1/me", headers={"authorization": "Bearer anything"})
     assert response.status_code == 401
 
 
-def test_la_clef_d_instance_ferme_l_enrolement(env: Any, monkeypatch: Any) -> None:
+def test_the_instance_key_closes_enrolment(env: Any, monkeypatch: Any) -> None:
     import importlib
 
     monkeypatch.setenv("SPLITTICKET_SIGNUP_KEY", "x" * 32)
@@ -53,10 +53,10 @@ def test_la_clef_d_instance_ferme_l_enrolement(env: Any, monkeypatch: Any) -> No
         assert client.post("/v1/devices", headers={"x-signup-key": "x" * 32}).status_code == 201
 
 
-# ── Clef Gemini ───────────────────────────────────────────────────────────────
+# ── Gemini key ────────────────────────────────────────────────────────────────
 
 
-def test_une_clef_enregistree_ne_ressort_jamais_entiere(
+def test_a_saved_key_never_comes_back_out_in_full(
     client: TestClient, device: dict[str, str]
 ) -> None:
     client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyTOPSECRET12345"}, headers=device)
@@ -64,11 +64,11 @@ def test_une_clef_enregistree_ne_ressort_jamais_entiere(
 
     assert body["settings"]["hasGeminiKey"] is True
     assert body["settings"]["geminiKeyHint"] == "AIza…345"
-    # La clef complète ne doit apparaître nulle part dans la réponse.
+    # The full key must not appear anywhere in the response.
     assert "AIzaSyTOPSECRET12345" not in client.get("/v1/me", headers=device).text
 
 
-def test_mettre_a_jour_le_modele_n_efface_pas_la_clef(
+def test_updating_the_model_does_not_clear_the_key(
     client: TestClient, device: dict[str, str]
 ) -> None:
     client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyABCDEFGH"}, headers=device)
@@ -79,13 +79,13 @@ def test_mettre_a_jour_le_modele_n_efface_pas_la_clef(
     assert settings["geminiModel"] == "gemini-3-flash"
 
 
-def test_une_chaine_vide_efface_la_clef(client: TestClient, device: dict[str, str]) -> None:
+def test_an_empty_string_clears_the_key(client: TestClient, device: dict[str, str]) -> None:
     client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyABCDEFGH"}, headers=device)
     client.put("/v1/me/settings", json={"geminiApiKey": ""}, headers=device)
     assert client.get("/v1/me", headers=device).json()["settings"]["hasGeminiKey"] is False
 
 
-def test_la_clef_est_chiffree_sur_le_disque(
+def test_the_key_is_encrypted_on_disk(
     client: TestClient, device: dict[str, str], env: Any
 ) -> None:
     client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyTOPSECRET12345"}, headers=device)
@@ -95,10 +95,10 @@ def test_la_clef_est_chiffree_sur_le_disque(
     assert b"AIzaSyTOPSECRET12345" not in contents
 
 
-# ── Groupes ───────────────────────────────────────────────────────────────────
+# ── Groups ────────────────────────────────────────────────────────────────────
 
 
-def test_rejoindre_un_groupe_ramene_les_membres_du_tricount(
+def test_joining_a_group_brings_back_the_tricount_members(
     client: TestClient, device: dict[str, str]
 ) -> None:
     response = client.post(
@@ -108,41 +108,41 @@ def test_rejoindre_un_groupe_ramene_les_membres_du_tricount(
 
     assert response.status_code == 201
     assert body["id"] == "tABC123456"
-    assert body["title"] == "Colocation"
-    # Les membres supprimés du tricount ne sont pas proposés à l'attribution.
+    assert body["title"] == "Flatshare"
+    # Members deleted from the tricount are not offered for assignment.
     assert [member["displayName"] for member in body["members"]] == ["Léa", "Mathieu"]
 
 
-def test_le_code_nu_marche_autant_que_le_lien(
+def test_the_bare_code_works_as_well_as_the_link(
     client: TestClient, device: dict[str, str]
 ) -> None:
     assert client.post("/v1/groups", json={"shareUrl": "tABC123456"}, headers=device).status_code == 201
 
 
-def test_un_lien_qui_n_en_est_pas_un_est_refuse(
+def test_something_that_is_not_a_link_is_refused(
     client: TestClient, device: dict[str, str]
 ) -> None:
-    response = client.post("/v1/groups", json={"shareUrl": "bonjour !"}, headers=device)
+    response = client.post("/v1/groups", json={"shareUrl": "hello there!"}, headers=device)
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "invalid_share_url"
 
 
-def test_rejoindre_deux_fois_ne_duplique_pas(
+def test_joining_twice_does_not_duplicate(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     client.post("/v1/groups", json={"shareUrl": "tABC123456"}, headers=device)
     assert len(client.get("/v1/groups", headers=device).json()) == 1
 
 
-def test_un_appareil_ne_voit_pas_le_groupe_d_un_autre(
+def test_a_device_does_not_see_another_ones_group(
     client: TestClient, group: str, other_device: dict[str, str]
 ) -> None:
     assert client.get("/v1/groups", headers=other_device).json() == []
-    # 404 et non 403 : ne pas y avoir accès et ne pas exister sont indiscernables.
+    # 404 and not 403: having no access and not existing are indistinguishable.
     assert client.get(f"/v1/groups/{group}", headers=other_device).status_code == 404
 
 
-def test_quitter_un_groupe_ne_le_supprime_que_pour_soi(
+def test_leaving_a_group_only_removes_it_for_yourself(
     client: TestClient, device: dict[str, str], other_device: dict[str, str], group: str
 ) -> None:
     client.post("/v1/groups", json={"shareUrl": group}, headers=other_device)
@@ -152,7 +152,7 @@ def test_quitter_un_groupe_ne_le_supprime_que_pour_soi(
     assert len(client.get("/v1/groups", headers=other_device).json()) == 1
 
 
-# ── Tickets ───────────────────────────────────────────────────────────────────
+# ── Receipts ──────────────────────────────────────────────────────────────────
 
 
 def _new_receipt(client: TestClient, headers: dict[str, str], group: str) -> dict[str, Any]:
@@ -161,7 +161,7 @@ def _new_receipt(client: TestClient, headers: dict[str, str], group: str) -> dic
     return response.json()
 
 
-def test_un_ticket_naît_vide_et_en_brouillon(
+def test_a_receipt_is_born_empty_and_in_draft(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -170,13 +170,13 @@ def test_un_ticket_naît_vide_et_en_brouillon(
     assert receipt["lines"] == []
 
 
-def test_ecrire_un_ticket_incremente_sa_version(
+def test_writing_a_receipt_increments_its_version(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
     receipt["merchant"] = "IGA"
     receipt["lines"] = [
-        {"id": "l1", "label": "PAIN", "quantity": 1, "unitPriceCents": 349, "totalCents": 349}
+        {"id": "l1", "label": "BREAD", "quantity": 1, "unitPriceCents": 349, "totalCents": 349}
     ]
 
     response = client.put(f"/v1/receipts/{receipt['id']}", json=receipt, headers=device)
@@ -188,27 +188,27 @@ def test_ecrire_un_ticket_incremente_sa_version(
     assert updated["lines"][0]["totalCents"] == 349
 
 
-def test_deux_editions_simultanees_ne_s_ecrasent_pas(
+def test_two_simultaneous_edits_do_not_overwrite_each_other(
     client: TestClient, device: dict[str, str], other_device: dict[str, str], group: str
 ) -> None:
     client.post("/v1/groups", json={"shareUrl": group}, headers=other_device)
     receipt = _new_receipt(client, device, group)
 
-    # Les deux appareils partent de la même version.
+    # Both devices start from the same version.
     first, second = dict(receipt), dict(receipt)
-    first["merchant"] = "Écrit en premier"
-    second["merchant"] = "Écrit en second"
+    first["merchant"] = "Written first"
+    second["merchant"] = "Written second"
 
     assert client.put(f"/v1/receipts/{receipt['id']}", json=first, headers=device).status_code == 200
 
     conflict = client.put(f"/v1/receipts/{receipt['id']}", json=second, headers=other_device)
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "version_conflict"
-    # Le ticket courant est joint au refus : le client peut expliquer et reprendre.
-    assert conflict.json()["detail"]["current"]["merchant"] == "Écrit en premier"
+    # The current receipt comes with the refusal: the client can explain and resume.
+    assert conflict.json()["detail"]["current"]["merchant"] == "Written first"
 
 
-def test_le_total_du_ticket_suit_lignes_taxes_et_ajustements(
+def test_the_receipt_total_follows_lines_taxes_and_adjustments(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -217,16 +217,16 @@ def test_le_total_du_ticket_suit_lignes_taxes_et_ajustements(
     ]
     receipt["taxes"] = [{"id": "t1", "label": "TPS", "code": "TPS", "amountCents": 50}]
     receipt["adjustments"] = [
-        {"id": "a1", "label": "Remise", "amountCents": -100, "mode": "proportional"}
+        {"id": "a1", "label": "Discount", "amountCents": -100, "mode": "proportional"}
     ]
     client.put(f"/v1/receipts/{receipt['id']}", json=receipt, headers=device)
 
     summary = client.get(f"/v1/groups/{group}/receipts", headers=device).json()[0]
-    # Le pourboire n'entre pas dans ce total : il ne figure pas sur le ticket.
+    # The tip is not part of this total: it does not appear on the receipt.
     assert summary["totalCents"] == 950
 
 
-def test_un_ticket_est_partage_par_tout_le_groupe(
+def test_a_receipt_is_shared_by_the_whole_group(
     client: TestClient, device: dict[str, str], other_device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -235,14 +235,14 @@ def test_un_ticket_est_partage_par_tout_le_groupe(
     assert client.get(f"/v1/receipts/{receipt['id']}", headers=other_device).status_code == 200
 
 
-def test_un_ticket_reste_invisible_hors_du_groupe(
+def test_a_receipt_stays_invisible_outside_the_group(
     client: TestClient, device: dict[str, str], other_device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
     assert client.get(f"/v1/receipts/{receipt['id']}", headers=other_device).status_code == 404
 
 
-def test_supprimer_un_ticket_emporte_sa_photo(
+def test_deleting_a_receipt_takes_its_photo_with_it(
     client: TestClient, device: dict[str, str], group: str, env: Any
 ) -> None:
     from app import config
@@ -250,7 +250,7 @@ def test_supprimer_un_ticket_emporte_sa_photo(
     receipt = _new_receipt(client, device, group)
     client.post(
         f"/v1/receipts/{receipt['id']}/image",
-        files={"file": ("ticket.jpg", b"\xff\xd8\xff-photo", "image/jpeg")},
+        files={"file": ("receipt.jpg", b"\xff\xd8\xff-photo", "image/jpeg")},
         headers=device,
     )
     assert len(list(config.IMAGES_DIR.iterdir())) == 1
@@ -259,7 +259,7 @@ def test_supprimer_un_ticket_emporte_sa_photo(
     assert list(config.IMAGES_DIR.iterdir()) == []
 
 
-def test_une_photo_remplacee_ne_laisse_pas_l_ancienne_derriere(
+def test_a_replaced_photo_does_not_leave_the_old_one_behind(
     client: TestClient, device: dict[str, str], group: str, env: Any
 ) -> None:
     from app import config
@@ -274,19 +274,19 @@ def test_une_photo_remplacee_ne_laisse_pas_l_ancienne_derriere(
     assert len(list(config.IMAGES_DIR.iterdir())) == 1
 
 
-def test_un_format_d_image_non_supporte_est_refuse(
+def test_an_unsupported_image_format_is_refused(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
     response = client.post(
         f"/v1/receipts/{receipt['id']}/image",
-        files={"file": ("ticket.pdf", b"%PDF-1.4", "application/pdf")},
+        files={"file": ("receipt.pdf", b"%PDF-1.4", "application/pdf")},
         headers=device,
     )
     assert response.status_code == 415
 
 
-def test_lire_sans_photo_le_dit_clairement(
+def test_scanning_without_a_photo_says_so_clearly(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -295,7 +295,7 @@ def test_lire_sans_photo_le_dit_clairement(
     assert response.json()["detail"]["code"] == "image_missing"
 
 
-def test_sans_aucune_clef_gemini_le_message_invite_a_en_definir_une(
+def test_without_any_gemini_key_the_message_invites_setting_one(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -308,13 +308,13 @@ def test_sans_aucune_clef_gemini_le_message_invite_a_en_definir_une(
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "no_gemini_key"
-    assert "réglages" in response.json()["detail"]["reason"]
+    assert "settings" in response.json()["detail"]["reason"]
 
 
-# ── Envoi vers Tricount ───────────────────────────────────────────────────────
+# ── Pushing to Tricount ───────────────────────────────────────────────────────
 
 
-def test_l_envoi_attribue_les_parts_par_uuid_de_membre(
+def test_the_push_assigns_shares_by_member_uuid(
     client: TestClient, device: dict[str, str], group: str, tricount: Any
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -344,7 +344,7 @@ def test_l_envoi_attribue_les_parts_par_uuid_de_membre(
     ]
 
 
-def test_une_repartition_qui_ne_tombe_pas_juste_n_est_pas_envoyee(
+def test_a_split_that_does_not_add_up_is_not_sent(
     client: TestClient, device: dict[str, str], group: str, tricount: Any
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -353,7 +353,7 @@ def test_une_repartition_qui_ne_tombe_pas_juste_n_est_pas_envoyee(
         json={
             "totalCents": 3000,
             "payerMemberUuid": "m-lea",
-            # Il manque un cent : mieux vaut ne rien envoyer.
+            # One cent is missing: better to send nothing.
             "shares": [
                 {"memberUuid": "m-lea", "amountCents": 2000},
                 {"memberUuid": "m-mathieu", "amountCents": 999},
@@ -367,7 +367,7 @@ def test_une_repartition_qui_ne_tombe_pas_juste_n_est_pas_envoyee(
     assert tricount.created == []
 
 
-def test_un_membre_disparu_du_tricount_arrete_l_envoi(
+def test_a_member_gone_from_the_tricount_stops_the_push(
     client: TestClient, device: dict[str, str], group: str, tricount: Any
 ) -> None:
     receipt = _new_receipt(client, device, group)
@@ -376,7 +376,7 @@ def test_un_membre_disparu_du_tricount_arrete_l_envoi(
         json={
             "totalCents": 1000,
             "payerMemberUuid": "m-lea",
-            "shares": [{"memberUuid": "m-fantome", "amountCents": 1000}],
+            "shares": [{"memberUuid": "m-ghost", "amountCents": 1000}],
         },
         headers=device,
     )
@@ -386,67 +386,67 @@ def test_un_membre_disparu_du_tricount_arrete_l_envoi(
     assert tricount.created == []
 
 
-# ── Comptes optionnels ────────────────────────────────────────────────────────
+# ── Optional accounts ─────────────────────────────────────────────────────────
 
 
-def test_un_compte_retrouve_ses_groupes_depuis_un_autre_appareil(
+def test_an_account_finds_its_groups_again_from_another_device(
     client: TestClient, device: dict[str, str], other_device: dict[str, str], group: str
 ) -> None:
-    credentials = {"email": "Ziroles@example.com", "password": "un-mot-de-passe-solide"}
+    credentials = {"email": "Ziroles@example.com", "password": "a-strong-password"}
     assert client.post("/v1/accounts", json=credentials, headers=device).status_code == 201
 
-    # Le groupe rejoint avant la création du compte doit avoir suivi.
+    # The group joined before the account was created must have followed.
     assert [g["id"] for g in client.get("/v1/groups", headers=device).json()] == [group]
 
     assert client.post("/v1/sessions", json=credentials, headers=other_device).status_code == 200
     assert [g["id"] for g in client.get("/v1/groups", headers=other_device).json()] == [group]
 
 
-def test_un_mot_de_passe_faux_ne_rattache_rien(
+def test_a_wrong_password_attaches_nothing(
     client: TestClient, device: dict[str, str], other_device: dict[str, str]
 ) -> None:
     client.post(
         "/v1/accounts",
-        json={"email": "a@example.com", "password": "un-mot-de-passe-solide"},
+        json={"email": "a@example.com", "password": "a-strong-password"},
         headers=device,
     )
     response = client.post(
-        "/v1/sessions", json={"email": "a@example.com", "password": "pas-le-bon"}, headers=other_device
+        "/v1/sessions", json={"email": "a@example.com", "password": "not-the-right-one"}, headers=other_device
     )
     assert response.status_code == 401
 
 
-def test_une_adresse_deja_prise_est_refusee(
+def test_an_address_already_taken_is_refused(
     client: TestClient, device: dict[str, str], other_device: dict[str, str]
 ) -> None:
-    credentials = {"email": "a@example.com", "password": "un-mot-de-passe-solide"}
+    credentials = {"email": "a@example.com", "password": "a-strong-password"}
     client.post("/v1/accounts", json=credentials, headers=device)
     assert client.post("/v1/accounts", json=credentials, headers=other_device).status_code == 409
 
 
-def test_health_annonce_ce_que_l_instance_sait_faire(client: TestClient) -> None:
+def test_health_announces_what_the_instance_can_do(client: TestClient) -> None:
     body = client.get("/health").json()
     assert body["ok"] is True
     assert body["serverHasGeminiKey"] is False
     assert body["canStoreUserKeys"] is True
 
 
-def test_un_code_introuvable_parle_du_lien_pas_du_service(
+def test_an_unknown_code_talks_about_the_link_not_the_service(
     client: TestClient, device: dict[str, str]
 ) -> None:
-    """« tINCONNU » a la forme d'un code mais ne mène nulle part. Le message doit
-    envoyer l'utilisateur vérifier son lien, pas le faire réessayer sans fin."""
-    response = client.post("/v1/groups", json={"shareUrl": "tINCONNU"}, headers=device)
+    """`tUNKNOWN` has the shape of a code but leads nowhere. The message must send
+    the user to check their link, not make them retry endlessly."""
+    response = client.post("/v1/groups", json={"shareUrl": "tUNKNOWN"}, headers=device)
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "group_not_found"
-    assert "lien" in response.json()["detail"]["reason"]
+    assert "link" in response.json()["detail"]["reason"]
 
 
-# ── Entretien ─────────────────────────────────────────────────────────────────
+# ── Housekeeping ──────────────────────────────────────────────────────────────
 
 
-def test_la_purge_efface_la_photo_mais_garde_le_ticket(
+def test_the_purge_deletes_the_photo_but_keeps_the_receipt(
     client: TestClient, device: dict[str, str], group: str, env: Any
 ) -> None:
     from app import config, db, maintenance
@@ -457,19 +457,19 @@ def test_la_purge_efface_la_photo_mais_garde_le_ticket(
         files={"file": ("t.jpg", b"photo", "image/jpeg")},
         headers=device,
     )
-    # On vieillit la photo de six mois.
+    # Age the photo by six months.
     db.execute("UPDATE image SET created_at = '2020-01-01T00:00:00+00:00'")
 
     assert maintenance.purge_old_images(days=90) == 1
 
     assert list(config.IMAGES_DIR.iterdir()) == []
-    # Le ticket survit, et sait qu'il n'a plus de photo.
+    # The receipt survives, and knows it has no photo any more.
     body = client.get(f"/v1/receipts/{receipt['id']}", headers=device).json()
     assert body["imageId"] is None
     assert client.get(f"/v1/receipts/{receipt['id']}/image", headers=device).status_code == 404
 
 
-def test_la_purge_epargne_les_photos_recentes(
+def test_the_purge_spares_recent_photos(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
     from app import maintenance
@@ -484,10 +484,10 @@ def test_la_purge_epargne_les_photos_recentes(
     assert client.get(f"/v1/receipts/{receipt['id']}", headers=device).json()["imageId"] is not None
 
 
-def test_une_retention_nulle_desactive_la_purge(
+def test_a_zero_retention_disables_the_purge(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
-    """Ne jamais purger est un choix d'hébergeur, pas une valeur à corriger."""
+    """Never purging is a hosting choice, not a value to correct."""
     from app import db, maintenance
 
     receipt = _new_receipt(client, device, group)
@@ -502,20 +502,20 @@ def test_une_retention_nulle_desactive_la_purge(
     assert client.get(f"/v1/receipts/{receipt['id']}", headers=device).json()["imageId"] is not None
 
 
-def test_la_purge_ramasse_les_fichiers_orphelins(
+def test_the_purge_collects_orphan_files(
     client: TestClient, device: dict[str, str], group: str, env: Any
 ) -> None:
-    """Un envoi coupé entre le fichier et la base laisse un fichier que rien ne nomme."""
+    """An upload cut off between the file and the database leaves a file nothing names."""
     from app import config, maintenance
 
     config.ensure_directories()
-    (config.IMAGES_DIR / "orphelin.bin").write_bytes(b"perdu")
+    (config.IMAGES_DIR / "orphan.bin").write_bytes(b"lost")
 
     assert maintenance.purge_orphan_files() == 1
     assert list(config.IMAGES_DIR.iterdir()) == []
 
 
-def test_health_annonce_la_version_du_contrat(client: TestClient) -> None:
+def test_health_announces_the_contract_version(client: TestClient) -> None:
     body = client.get("/health").json()
     assert body["contractVersion"] == "1"
     assert body["imageRetentionDays"] == 90

@@ -1,18 +1,18 @@
-# API SplitTicket — dépendances directes.
-# Les versions sont figées : une API de lecture de tickets n'a rien à gagner à
-# suivre l'amont automatiquement, et beaucoup à perdre si un client non officiel
-# change de comportement du jour au lendemain.
+# SplitTicket API — direct dependencies.
+# Versions are pinned: a receipt-scanning API has nothing to gain from tracking
+# upstream automatically, and much to lose if an unofficial client changes its
+# behaviour overnight.
 
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
 python-multipart==0.0.32
 pydantic==2.13.5
 
-# Lecture des tickets.
+# Receipt scanning.
 google-genai==2.22.0
 
-# Client Tricount non officiel, rétro-conçu depuis l'application Android.
-# Apporte aussi `cryptography`, dont on se sert pour chiffrer au repos les clefs
-# Gemini que les utilisateurs nous confient.
+# Unofficial Tricount client, reverse-engineered from the Android app.
+# Also brings in `cryptography`, which we use to encrypt at rest the Gemini keys
+# users entrust to us.
 tricount-api==0.1.2
 cryptography==50.0.1

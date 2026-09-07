@@ -1,18 +1,16 @@
 """
-Arithmétique monétaire en centimes entiers.
+Monetary arithmetic in integer cents.
 
-Portage fidèle de `src/lib/money.ts` côté PWA. L'application n'a jamais laissé
-un flottant représenter de l'argent, et ce portage ne doit pas être l'occasion
-d'en introduire un : les tests de `tests/test_money.py` sont les mêmes que ceux
-de `money.test.ts`, et c'est délibéré.
+A faithful port of `src/lib/money.ts` on the PWA side. The application has never
+let a float represent money, and this port must not be the occasion to introduce
+one: the tests in `tests/test_money.py` are the same as those in
+`money.test.ts`, and that is deliberate.
 
-Deux arrondis cohabitent, comme en JavaScript, et ils ne sont pas
-interchangeables :
- - `js_round` reproduit `Math.round` : la moitié part vers +∞ (−175,5 → −175) ;
- - `round_half_up` reproduit le `roundHalfUp` du client : la moitié s'éloigne de
-   zéro (−175,5 → −176).
-Confondre les deux décale des centimes sur les lignes négatives, c'est-à-dire
-sur les remises imprimées.
+Two roundings coexist, as in JavaScript, and they are not interchangeable:
+ - `js_round` reproduces `Math.round`: halves go towards +∞ (−175.5 → −175);
+ - `round_half_up` reproduces the client's `roundHalfUp`: halves move away from
+   zero (−175.5 → −176).
+Confusing the two shifts cents on negative lines, that is, on printed discounts.
 """
 
 from __future__ import annotations
@@ -20,12 +18,12 @@ from __future__ import annotations
 import math
 import re
 
-# 2^53 − 1 : au-delà, JavaScript ne garantit plus l'exactitude d'un entier, et
-# `Number.isSafeInteger` refuse. On refuse pareil, pour rendre les mêmes null.
+# 2^53 − 1: beyond this, JavaScript no longer guarantees integer exactness, and
+# `Number.isSafeInteger` refuses. We refuse likewise, to return the same nulls.
 MAX_SAFE_INTEGER = 2**53 - 1
 
-# Espaces ordinaires, insécables et insécables fins : les trois se rencontrent
-# dans les montants recopiés depuis un ticket.
+# Ordinary, non-breaking and narrow no-break spaces: all three turn up in
+# amounts copied from a receipt.
 _SPACES = re.compile(r"[\s  ]")
 _CURRENCY_EDGES = re.compile(r"^[$€]+|[$€]+$")
 _AMOUNT = re.compile(r"^(-?)(\d*)(?:[.,](\d{0,2}))?$")
@@ -33,12 +31,12 @@ _LOOSE_NOISE = re.compile(r"[\s  $€]")
 
 
 def js_round(value: float) -> int:
-    """`Math.round` de JavaScript : la moitié va vers +∞, pas away-from-zero."""
+    """JavaScript's `Math.round`: halves go towards +∞, not away from zero."""
     return math.floor(value + 0.5)
 
 
 def round_half_up(value: float) -> int:
-    """Arrondi symétrique : la moitié s'éloigne de zéro, dans les deux sens."""
+    """Symmetric rounding: halves move away from zero, in both directions."""
     if value < 0:
         return -js_round(-value)
     return js_round(value)
@@ -46,12 +44,12 @@ def round_half_up(value: float) -> int:
 
 def parse_amount_to_cents(raw: object) -> int | None:
     """
-    Montant saisi ou imprimé → centimes entiers, ou None si ce n'en est pas un.
+    Typed or printed amount → integer cents, or None if it is not one.
 
-    Strict par construction : deux décimales au plus, virgule ou point, un seul
-    signe. Ce qui ne rentre pas dans ce moule n'est pas deviné, il est refusé —
-    l'appelant décide alors s'il écarte la ligne ou tente une lecture plus
-    tolérante (voir `as_cents` dans normalize.py).
+    Strict by construction: at most two decimals, comma or dot, a single sign.
+    Anything that does not fit that mould is not guessed, it is refused — the
+    caller then decides whether to drop the line or attempt a more tolerant
+    reading (see `as_cents` in normalize.py).
     """
     if not isinstance(raw, str):
         return None
@@ -68,7 +66,7 @@ def parse_amount_to_cents(raw: object) -> int | None:
         return None
 
     sign, whole, decimal_raw = match.group(1), match.group(2) or "", match.group(3)
-    # « - » seul, « , » seul : un signe ou un séparateur ne fait pas un montant.
+    # A lone "-", a lone ",": a sign or a separator does not make an amount.
     if whole == "" and not decimal_raw:
         return None
 
@@ -80,7 +78,7 @@ def parse_amount_to_cents(raw: object) -> int | None:
 
 
 def to_cents(amount: float) -> int | None:
-    """Nombre en unités monétaires → centimes, en refusant l'infini et le NaN."""
+    """Number in currency units → cents, refusing infinity and NaN."""
     if not isinstance(amount, (int, float)) or isinstance(amount, bool):
         return None
     if math.isnan(amount) or math.isinf(amount):
@@ -93,9 +91,9 @@ def to_cents(amount: float) -> int | None:
 
 def number_to_string(value: float) -> str:
     """
-    `String(nombre)` de JavaScript. Utile parce que le modèle peut rendre un
-    nombre là où une chaîne était demandée : JS écrit « 5 » quand Python écrirait
-    « 5.0 », et la différence remonterait jusqu'au libellé affiché.
+    JavaScript's `String(number)`. Useful because the model may return a number
+    where a string was asked for: JS writes "5" where Python would write "5.0",
+    and the difference would surface all the way up to the displayed label.
     """
     if isinstance(value, int):
         return str(value)
@@ -110,8 +108,8 @@ def number_to_string(value: float) -> str:
 
 def js_number(text: str) -> float:
     """
-    `Number(chaîne)` de JavaScript, réduit à ce dont on a besoin : renvoie NaN
-    plutôt que de lever, parce que l'appelant teste la finitude, pas l'exception.
+    JavaScript's `Number(string)`, cut down to what we need: returns NaN rather
+    than raising, because the caller tests for finiteness, not for exceptions.
     """
     stripped = text.strip()
     if stripped == "":
@@ -124,9 +122,9 @@ def js_number(text: str) -> float:
 
 def loose_number(text: str) -> float:
     """
-    Lecture tolérante d'un montant : on retire bruit et devise, puis on ramène
-    la première virgule à un point. `replace(',', '.')` de JavaScript n'agit que
-    sur la première occurrence — reproduire ce détail fait que « 1,234,56 »
-    reste illisible ici aussi, au lieu d'être lu de travers.
+    Tolerant reading of an amount: strip noise and currency, then turn the first
+    comma into a dot. JavaScript's `replace(',', '.')` only acts on the first
+    occurrence — reproducing that detail means "1,234,56" stays unreadable here
+    too, instead of being misread.
     """
     return js_number(_LOOSE_NOISE.sub("", text).replace(",", ".", 1))

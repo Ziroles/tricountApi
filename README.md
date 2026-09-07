@@ -1,41 +1,41 @@
-# API SplitTicket
+# SplitTicket API
 
-Le service qui porte [SplitTicket](https://github.com/MathieuMarthy/triCountHelper) : lecture
-des tickets de caisse par IA de vision, groupes adossés à Tricount, stockage partagé des
-tickets, et envoi de la dépense.
+The service behind [SplitTicket](https://github.com/MathieuMarthy/triCountHelper): reading till
+receipts with a vision AI, groups backed by Tricount, shared storage of receipts, and pushing
+the expense.
 
 > [!WARNING]
-> **Avertissement légal et technique**
-> Tricount ne publie aucune interface programmable. Ce service utilise
-> [`tricount-api`](https://github.com/elrandar/tricount-api), un client Python non officiel
-> rétro-conçu depuis l'application Android.
-> - Ce projet n'est ni affilié ni approuvé par Tricount ou bunq.
-> - Cet usage sort des conditions d'utilisation du service.
-> - Les points d'entrée peuvent changer ou disparaître sans préavis.
+> **Legal and technical warning**
+> Tricount publishes no programmable interface. This service uses
+> [`tricount-api`](https://github.com/elrandar/tricount-api), an unofficial Python client
+> reverse-engineered from the Android app.
+> - This project is neither affiliated with nor endorsed by Tricount or bunq.
+> - This use falls outside the service's terms of use.
+> - The endpoints may change or disappear without notice.
 
 ---
 
-## Ce que fait le service
+## What the service does
 
-- **Groupes.** Un groupe *est* un tricount, identifié par son code d'invitation. Le rejoindre
-  ramène la liste de ses membres : plus personne ne ressaisit les participants à la main.
-- **Lecture des tickets.** L'appel à Gemini se fait ici, avec la clé de l'utilisateur ou celle
-  de l'instance. Le résultat est **écrit sur le ticket avant de répondre** : une connexion qui
-  tombe pendant la lecture ne fait plus perdre l'appel.
-- **Tickets partagés.** Un ticket appartient au groupe, pas à l'appareil. Verrou optimiste par
-  version : deux éditions simultanées ne s'écrasent pas en silence.
-- **Identité par appareil.** Un appareil s'enrôle seul au premier lancement. Le compte est
-  *optionnel*, et ne sert qu'à retrouver ses groupes ailleurs.
-- **Envoi de la dépense.** Les parts portent les uuid des membres : plus d'appariement par nom.
+- **Groups.** A group *is* a tricount, identified by its invitation code. Joining it brings back
+  the list of its members: nobody types the participants in by hand any more.
+- **Receipt scanning.** The call to Gemini happens here, with the user's key or the instance's.
+  The result is **written onto the receipt before answering**: a connection that drops during
+  the scan no longer wastes the call.
+- **Shared receipts.** A receipt belongs to the group, not to the device. Optimistic lock by
+  version: two simultaneous edits do not overwrite each other silently.
+- **Identity by device.** A device enrols itself on first launch. An account is *optional*, and
+  only serves to find your groups again elsewhere.
+- **Pushing the expense.** Shares carry member uuids: no more matching by name.
 
-Bâti sur FastAPI et SQLite. Les photos vont sur un volume, la base aussi.
+Built on FastAPI and SQLite. The photos live on a volume, so does the database.
 
 ---
 
-## Prérequis
+## Requirements
 
-- **Recommandé** : [Docker](https://docs.docker.com/get-docker/) et Docker Compose
-- **Sinon** : Python 3.12+ et `pip`
+- **Recommended**: [Docker](https://docs.docker.com/get-docker/) and Docker Compose
+- **Otherwise**: Python 3.12+ and `pip`
 
 ---
 
@@ -43,29 +43,29 @@ Bâti sur FastAPI et SQLite. Les photos vont sur un volume, la base aussi.
 
 ### Docker Compose
 
-1. **Cloner** :
+1. **Clone**:
    ```bash
    git clone https://github.com/Ziroles/tricountApi.git
    cd tricountApi
    cp .env.example .env
    ```
 
-2. **Engendrer la clé de chiffrement** — elle protège les clés Gemini des utilisateurs au repos.
-   Sans elle, le service refuse d'en conserver une plutôt que de l'écrire en clair :
+2. **Generate the encryption key** — it protects users' Gemini keys at rest. Without it, the
+   service refuses to store one rather than write it in the clear:
    ```bash
    python3 -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
-   Reportez-la dans `.env` sous `SPLITTICKET_SECRET_KEY`.
+   Copy it into `.env` under `SPLITTICKET_SECRET_KEY`.
 
-3. **Démarrer** :
+3. **Start**:
    ```bash
    docker compose up -d
    docker compose logs -f
    ```
-   Le service écoute sur `http://localhost:8787`. `GET /health` dit ce qu'il sait faire, et
-   `/docs` expose la documentation OpenAPI engendrée.
+   The service listens on `http://localhost:8787`. `GET /health` says what it can do, and
+   `/docs` exposes the generated OpenAPI documentation.
 
-### Sans Docker
+### Without Docker
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -77,52 +77,52 @@ uvicorn app.main:app --host 127.0.0.1 --port 8787
 
 ---
 
-## Variables d'environnement
+## Environment variables
 
-| Variable | Rôle | Défaut |
+| Variable | Role | Default |
 |---|---|---|
-| `SPLITTICKET_SECRET_KEY` | **Requise** pour conserver les clés Gemini des utilisateurs (chiffrement au repos). | *aucun* |
-| `SPLITTICKET_SIGNUP_KEY` | Optionnelle. Exigée pour enrôler un **nouvel** appareil (`X-Signup-Key`) : ferme une instance publique sans gérer de comptes. | vide (ouvert) |
-| `GEMINI_API_KEY` | Optionnelle. Clé de repli quand l'utilisateur n'a pas la sienne. Vide = chacun apporte la sienne, et l'application le lui dit. | vide |
-| `GEMINI_MODEL` | Modèle par défaut. | `gemini-2.5-flash` |
-| `SPLITTICKET_DATA_DIR` | Base, photos, identifiants Tricount. | `/data` |
-| `SPLITTICKET_ALLOWED_ORIGINS` | Origines autorisées, séparées par des virgules. | `*` |
-| `SPLITTICKET_IMAGE_RETENTION_DAYS` | Purge des photos après N jours. `0` = jamais. | `90` |
-| `SPLITTICKET_HOST` / `SPLITTICKET_PORT` | Écoute. | `127.0.0.1` / `8787` |
-| `TRICOUNT_CREDENTIALS_PATH` | Identifiants d'appareil Tricount. | `$DATA_DIR/.tricount-credentials.json` |
+| `SPLITTICKET_SECRET_KEY` | **Required** to store users' Gemini keys (encryption at rest). | *none* |
+| `SPLITTICKET_SIGNUP_KEY` | Optional. Required to enrol a **new** device (`X-Signup-Key`): closes off a public instance without managing accounts. | empty (open) |
+| `GEMINI_API_KEY` | Optional. Fallback key for when a user has none of their own. Empty = everyone brings their own, and the app says so. | empty |
+| `GEMINI_MODEL` | Default model. | `gemini-2.5-flash` |
+| `SPLITTICKET_DATA_DIR` | Database, photos, Tricount credentials. | `/data` |
+| `SPLITTICKET_ALLOWED_ORIGINS` | Allowed origins, comma-separated. | `*` |
+| `SPLITTICKET_IMAGE_RETENTION_DAYS` | Purge photos after N days. `0` = never. | `90` |
+| `SPLITTICKET_HOST` / `SPLITTICKET_PORT` | Listen address. | `127.0.0.1` / `8787` |
+| `TRICOUNT_CREDENTIALS_PATH` | Tricount device credentials. | `$DATA_DIR/.tricount-credentials.json` |
 
-`*` en origine autorisée convient à un déploiement personnel : l'authentification est un **jeton
-porté**, pas un cookie, donc il n'y a pas de CSRF à craindre. Restreindre reste préférable en
+`*` as an allowed origin is fine for a personal deployment: authentication is a **bearer
+token**, not a cookie, so there is no CSRF to worry about. Restricting it is still preferable in
 public.
 
-`SPLITTICKET_RELAY_KEY` n'existe plus ; `TRICOUNT_RELAY_KEY` est encore lue comme second recours
-pour `SPLITTICKET_SIGNUP_KEY`, afin de ne pas casser un déploiement existant.
+`SPLITTICKET_RELAY_KEY` no longer exists; `TRICOUNT_RELAY_KEY` is still read as a fallback for
+`SPLITTICKET_SIGNUP_KEY`, so as not to break an existing deployment.
 
 ---
 
-## Authentification
+## Authentication
 
-Aucune inscription n'est demandée à l'utilisateur. Au premier lancement, l'application appelle :
+The user is never asked to sign up. On first launch, the app calls:
 
 ```http
 POST /v1/devices
-X-Signup-Key: <si l'instance en exige une>
+X-Signup-Key: <if the instance requires one>
 
 → 201 {"deviceId": "...", "token": "..."}
 ```
 
-Le jeton est renvoyé **une seule fois** et présenté ensuite à chaque requête :
+The token is returned **once only** and presented on every request afterwards:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-La base ne conserve que son empreinte : une copie du fichier ne suffit pas à se faire passer
-pour un appareil.
+The database only keeps its fingerprint: a copy of the file is not enough to impersonate a
+device.
 
-Un **compte** (`POST /v1/accounts`, `POST /v1/sessions`) est optionnel. Il ne sert qu'à
-rattacher plusieurs appareils aux mêmes groupes. Rattacher un appareil transfère ses accès au
-compte, pour que rien ne disparaisse au passage.
+An **account** (`POST /v1/accounts`, `POST /v1/sessions`) is optional. It only serves to attach
+several devices to the same groups. Attaching a device transfers its access to the account, so
+that nothing disappears along the way.
 
 ---
 
@@ -130,79 +130,78 @@ compte, pour que rien ne disparaisse au passage.
 
 | | |
 |---|---|
-| `POST /v1/devices` | Enrôle un appareil |
-| `POST /v1/accounts` · `POST /v1/sessions` | Compte optionnel |
-| `GET /v1/me` · `PUT /v1/me/settings` | Clé Gemini, modèle |
-| `GET /v1/models` | Modèles lisibles avec la clé effective |
-| `GET · POST /v1/groups` | Lister, rejoindre par lien de partage |
-| `GET · DELETE /v1/groups/{id}` | Consulter, quitter (pour soi seul) |
-| `POST /v1/groups/{id}/members/refresh` | Resynchroniser les membres |
-| `GET · POST /v1/groups/{id}/receipts` | Tickets du groupe |
-| `GET · PUT · DELETE /v1/receipts/{id}` | Un ticket ; `PUT` porte sa `version` |
+| `POST /v1/devices` | Enrol a device |
+| `POST /v1/accounts` · `POST /v1/sessions` | Optional account |
+| `GET /v1/me` · `PUT /v1/me/settings` | Gemini key, model |
+| `GET /v1/models` | Models readable with the effective key |
+| `GET · POST /v1/groups` | List, join by share link |
+| `GET · DELETE /v1/groups/{id}` | View, leave (for yourself only) |
+| `POST /v1/groups/{id}/members/refresh` | Resynchronise the members |
+| `GET · POST /v1/groups/{id}/receipts` | Receipts of the group |
+| `GET · PUT · DELETE /v1/receipts/{id}` | One receipt; `PUT` carries its `version` |
 | `POST · GET /v1/receipts/{id}/image` | Photo |
-| `POST /v1/receipts/{id}/scan` | Lecture OCR, écrite sur le ticket |
-| `POST /v1/receipts/{id}/push` | Dépense dans le tricount |
+| `POST /v1/receipts/{id}/scan` | OCR scan, written onto the receipt |
+| `POST /v1/receipts/{id}/push` | Expense in the tricount |
 
-Les erreurs portent un code exploitable : `{"detail": {"code": "no_gemini_key", "reason": "…"}}`.
-`reason` est rédigé pour être affiché tel quel à l'utilisateur, en français.
+Errors carry an actionable code: `{"detail": {"code": "no_gemini_key", "reason": "…"}}`.
+`reason` is written to be displayed to the user as-is, in English.
 
-### Concurrence
+### Concurrency
 
-`PUT /v1/receipts/{id}` porte la `version` que le client croit modifier. Périmée, le serveur
-répond `409` **en joignant le ticket courant** : le client peut expliquer ce qui s'est passé et
-repartir, au lieu de recevoir un refus sec.
+`PUT /v1/receipts/{id}` carries the `version` the client believes it is editing. If it is stale,
+the server answers `409` **with the current receipt attached**: the client can explain what
+happened and pick up again, instead of receiving a bare refusal.
 
-### Clé Gemini
+### Gemini key
 
-L'ordre est : clé de l'utilisateur d'abord, clé de l'instance ensuite. Quelqu'un qui a pris la
-peine d'enregistrer la sienne veut que ses lectures soient débitées chez lui. Si aucune n'est
-disponible, la réponse est `400 {"code": "no_gemini_key"}`, que l'application traduit en
-invitation à en renseigner une.
+The order is: the user's key first, the instance's key second. Someone who went to the trouble
+of saving their own wants their scans billed to them. If none is available, the response is
+`400 {"code": "no_gemini_key"}`, which the app turns into an invitation to set one.
 
-Les clés sont chiffrées au repos (Fernet) et ne ressortent **jamais** entières : l'API n'expose
-qu'un indice, `AIza…7fQ`, assez pour que son propriétaire reconnaisse laquelle est en place.
-
----
-
-## Entretien
-
-Une tâche de fond tourne au démarrage puis une fois par jour : elle efface les photos plus
-vieilles que `SPLITTICKET_IMAGE_RETENTION_DAYS`, ainsi que les fichiers qu'aucune ligne ne
-référence (résidus d'un envoi interrompu).
-
-**Seule la photo disparaît.** Les lignes du ticket ont été vérifiées par un humain à l'écran de
-vérification ; la photo n'est qu'une pièce justificative, utile quelques semaines. Le ticket
-reste, et son `imageId` repasse à `null` pour que l'application sache qu'il n'y a plus rien à
-afficher plutôt que de réclamer un fichier absent.
-
-Mettre `0` désactive la purge — c'est un choix, mais le volume grossit alors sans limite.
+Keys are encrypted at rest (Fernet) and **never** come back out in full: the API only exposes a
+hint, `AIza…7fQ`, enough for its owner to recognise which one is in place.
 
 ---
 
-## Compatibilité des versions
+## Housekeeping
 
-`GET /health` annonce `contractVersion`. L'application la compare à la sienne au démarrage et
-prévient l'utilisateur en cas d'écart, plutôt que d'échouer plus tard sur une route qui a changé
-de forme. Incrémentez-la à chaque changement incompatible de la surface `/v1`.
+A background task runs at startup and then once a day: it deletes photos older than
+`SPLITTICKET_IMAGE_RETENTION_DAYS`, along with files that no row references (leftovers from an
+interrupted upload).
+
+**Only the photo disappears.** The receipt lines were checked by a human on the verification
+screen; the photo is only supporting evidence, useful for a few weeks. The receipt stays, and
+its `imageId` goes back to `null` so the app knows there is nothing left to display rather than
+asking for a missing file.
+
+Setting `0` disables the purge — that is a choice, but the volume then grows without limit.
 
 ---
 
-## Portée et vie privée
+## Version compatibility
 
-Le service détient une **seule** identité d'appareil Tricount pour tous ses utilisateurs. Trois
-conséquences assumées :
+`GET /health` announces `contractVersion`. The app compares it to its own at startup and warns
+the user on a mismatch, rather than failing later on a route that changed shape. Bump it on
+every breaking change to the `/v1` surface.
 
-1. `list_tricounts()` renverrait les tricounts rejoints par *tous* les utilisateurs de
-   l'instance. **Il n'est jamais appelé** : la liste des groupes vient de la table
-   `group_access`, et d'elle seule. Un appareil qui demande un groupe auquel il n'a pas accès
-   reçoit `404`, pas `403` — ne pas y avoir droit et ne pas exister doivent être indiscernables.
-2. La lecture des membres passe par `get_tricount`, pas `join_tricount` : lire ne doit pas
-   inscrire notre robot dans le tricount de quelqu'un.
-3. Le quota est mutualisé. Si bunq coupe ce robot, l'instance entière tombe.
+---
 
-Hébergez donc pour vous et vos proches. Une instance ouverte au public devrait au minimum
-définir `SPLITTICKET_SIGNUP_KEY`, et se passer de `GEMINI_API_KEY` pour que chacun paie ses
-lectures.
+## Scope and privacy
+
+The service holds a **single** Tricount device identity for all of its users. Three accepted
+consequences:
+
+1. `list_tricounts()` would return the tricounts joined by *all* the users of the instance.
+   **It is never called**: the list of groups comes from the `group_access` table, and from
+   nowhere else. A device asking for a group it has no access to gets `404`, not `403` — having
+   no right to it and it not existing must be indistinguishable.
+2. Reading the members goes through `get_tricount`, not `join_tricount`: reading must not sign
+   our bot up to someone else's tricount.
+3. The quota is shared. If bunq cuts this bot off, the whole instance goes down.
+
+So host it for yourself and the people close to you. An instance open to the public should at a
+minimum set `SPLITTICKET_SIGNUP_KEY`, and do without `GEMINI_API_KEY` so that everyone pays for
+their own scans.
 
 ---
 
@@ -213,12 +212,12 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Tricount et Gemini sont simulés : la suite ne coûte rien et ne crée aucune vraie dépense.
+Tricount and Gemini are faked: the suite costs nothing and creates no real expense.
 
-`tests/test_normalize.py` et `tests/test_money.py` sont le **portage cas pour cas** des tests
-TypeScript de la version précédente. Ce sont eux qui garantissent que déplacer l'OCR côté
-serveur n'a pas déplacé un centime : tant qu'ils passent, la normalisation rend exactement les
-mêmes montants que le client rendait.
+`tests/test_normalize.py` and `tests/test_money.py` are the **case-for-case port** of the
+TypeScript tests from the previous version. They are what guarantees that moving the OCR to the
+server did not move a cent: as long as they pass, normalisation returns exactly the same amounts
+the client used to return.
 
 ---
 
@@ -226,13 +225,13 @@ mêmes montants que le client rendait.
 
 ```
 app/
-  main.py            Application, CORS, démarrage
-  config.py          Variables d'environnement
-  db.py              SQLite, schéma, migrations par user_version
-  auth.py            Appareils, comptes, propriétaire
-  crypto.py          Chiffrement des clés Gemini au repos
-  models.py          Contrat HTTP (Pydantic)
-  tricount_client.py Accès à Tricount
+  main.py            Application, CORS, startup
+  config.py          Environment variables
+  db.py              SQLite, schema, migrations by user_version
+  auth.py            Devices, accounts, owner
+  crypto.py          Encryption of Gemini keys at rest
+  models.py          HTTP contract (Pydantic)
+  tricount_client.py Access to Tricount
   extraction/        money · normalize · prompt · gemini
   routes/            identity · groups · receipts
 tests/
@@ -242,4 +241,4 @@ tests/
 
 ## Licence
 
-Projet libre. Consultez les conditions d'utilisation de Tricount/bunq avant tout déploiement.
+Free software. Read Tricount/bunq's terms of use before any deployment.

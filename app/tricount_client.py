@@ -1,23 +1,23 @@
 """
-Accès à Tricount, via le client non officiel `tricount-api`.
+Access to Tricount, through the unofficial `tricount-api` client.
 
-Tricount (bunq) ne publie aucune interface programmable. Ce module délègue le
-protocole plutôt que de le réimplémenter à l'aveugle, et assume deux
-conséquences inchangées depuis l'ancien relais :
- - l'usage sort des conditions d'utilisation du service ;
- - les points d'entrée peuvent disparaître sans préavis, et toute erreur doit se
-   traduire par un échec propre, jamais par une dépense à moitié créée.
+Tricount (bunq) publishes no programmable interface. This module delegates the
+protocol rather than reimplementing it blindly, and accepts two consequences
+unchanged from the old relay:
+ - this use falls outside the service's terms of use;
+ - the endpoints can disappear without notice, and every error must turn into a
+   clean failure, never a half-created expense.
 
-**Une seule identité d'appareil pour toute l'instance.** Le client génère au
-premier appel une paire de clefs qu'il réutilise ensuite. Trois conséquences à
-garder en tête :
+**One single device identity for the whole instance.** The client generates a
+key pair on the first call and reuses it afterwards. Three consequences to keep
+in mind:
 
- 1. `list_tricounts()` renverrait les tricounts rejoints par *tous* les
-    utilisateurs de l'instance. Il n'est jamais appelé : la liste des groupes
-    d'un utilisateur vient de notre table `group_access`, et d'elle seule.
- 2. On préfère `get_tricount` à `join_tricount` : lire les membres ne doit pas
-    inscrire notre robot dans le tricount de quelqu'un.
- 3. Le quota est mutualisé. Si bunq coupe ce robot, l'instance entière tombe.
+ 1. `list_tricounts()` would return the tricounts joined by *all* the users of
+    the instance. It is never called: a user's list of groups comes from our
+    `group_access` table, and from nowhere else.
+ 2. We prefer `get_tricount` over `join_tricount`: reading the members must not
+    sign our bot up to someone else's tricount.
+ 3. The quota is shared. If bunq cuts this bot off, the whole instance goes down.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from . import config
 
 logger = logging.getLogger("splitticket.tricount")
 
-# Le code d'invitation tel qu'il apparaît dans https://tricount.com/tXXXXXXXX.
+# The invitation code as it appears in https://tricount.com/tXXXXXXXX.
 SHARE_CODE = re.compile(r"^[A-Za-z0-9]{6,}$")
 SHARE_URL = re.compile(r"tricount\.com/(?:t/)?([A-Za-z0-9]{6,})")
 
@@ -43,7 +43,7 @@ _client: TricountAPI | None = None
 
 
 class TricountError(Exception):
-    """Échec attendu, converti en réponse « ok: false » avec un statut."""
+    """Expected failure, turned into an "ok: false" response with a status."""
 
     def __init__(self, reason: str, status: int = 502, code: str = "tricount_failed") -> None:
         super().__init__(reason)
@@ -54,11 +54,11 @@ class TricountError(Exception):
 
 def parse_share_code(raw: str) -> str | None:
     """
-    Extrait le code d'invitation d'un lien Tricount, ou accepte le code nu.
+    Extract the invitation code from a Tricount link, or accept the bare code.
 
-    L'utilisateur colle ce qu'il a sous la main : un lien complet partagé depuis
-    l'application, ou le code seul. Les deux doivent marcher — refuser le code nu
-    au motif qu'il manque un domaine serait une chicane, pas une validation.
+    Users paste whatever they have at hand: a full link shared from the app, or
+    the code on its own. Both must work — refusing the bare code on the grounds
+    that it is missing a domain would be pedantry, not validation.
     """
     text = (raw or "").strip()
     if text == "":
@@ -70,7 +70,7 @@ def parse_share_code(raw: str) -> str | None:
 
 
 def get_client() -> TricountAPI:
-    """Client authentifié, créé une fois puis réutilisé par le processus."""
+    """Authenticated client, created once and then reused by the process."""
     global _client
     with _lock:
         if _client is None:
@@ -87,30 +87,30 @@ def get_client() -> TricountAPI:
 
 
 def forget_client() -> None:
-    """Oublie la session : la prochaine tentative repartira d'une authentification."""
+    """Forget the session: the next attempt will start from an authentication."""
     global _client
     with _lock:
         _client = None
 
 
 def _call(operation: str, action: Any, *args: Any, **kwargs: Any) -> Any:
-    """Appelle Tricount en convertissant tout imprévu en échec propre."""
+    """Call Tricount, turning anything unexpected into a clean failure."""
     try:
         return action(*args, **kwargs)
     except TricountError:
         raise
-    except Exception as error:  # noqa: BLE001 — le détail reste côté serveur
-        logger.warning("%s a échoué : %s: %s", operation, type(error).__name__, error)
+    except Exception as error:  # noqa: BLE001 — the detail stays server-side
+        logger.warning("%s failed: %s: %s", operation, type(error).__name__, error)
         forget_client()
         raise TricountError(
-            "Tricount n'a pas répondu comme attendu. Réessayez, ou utilisez la copie manuelle."
+            "Tricount did not respond as expected. Try again, or copy the split manually."
         ) from error
 
 
 def serialize_members(tricount: Any) -> list[dict[str, str]]:
     """
-    Membres exposés à la PWA. Les membres supprimés sont écartés : on ne propose
-    pas d'attribuer une part à quelqu'un qui a quitté le tricount.
+    Members exposed to the PWA. Deleted members are left out: we do not offer to
+    assign a share to someone who has left the tricount.
     """
     members: list[dict[str, str]] = []
     for member in tricount.members:
@@ -127,30 +127,29 @@ def serialize_members(tricount: Any) -> list[dict[str, str]]:
 
 
 def fetch_group(code: str) -> dict[str, Any]:
-    """Lit un tricount par son code d'invitation, sans y inscrire notre robot."""
+    """Read a tricount by its invitation code, without signing our bot up to it."""
     client = get_client()
     try:
         tricount = _call("get_tricount", client.get_tricount, code)
     except TricountError:
-        # Certains codes n'ouvrent la lecture qu'après un « join ». On n'y vient
-        # qu'en second recours, pour ne pas laisser de trace inutilement.
-        logger.info("lecture directe refusée pour %s, tentative de join", code)
+        # Some codes only open up for reading after a "join". We only fall back
+        # to it as a second resort, so as not to leave a trace needlessly.
+        logger.info("direct read refused for %s, trying join", code)
         try:
             tricount = _call("join_tricount", client.join_tricount, code, fetch_full=False)
         except TricountError as error:
-            # Les deux voies ont échoué. À cette étape, l'utilisateur vient de
-            # coller un lien : « ce lien ne mène nulle part » est presque
-            # toujours la bonne explication, et c'est la seule sur laquelle il
-            # puisse agir. Dire « le service n'a pas répondu » l'enverrait
-            # réessayer indéfiniment un code erroné.
+            # Both routes failed. At this point the user has just pasted a link:
+            # "this link leads nowhere" is almost always the right explanation,
+            # and the only one they can act on. Saying "the service did not
+            # respond" would send them retrying a wrong code forever.
             raise TricountError(
-                "Aucun tricount ne correspond à ce lien. Vérifiez-le, et qu'il est bien partagé.",
+                "No tricount matches this link. Check it, and that it is actually shared.",
                 status=404,
                 code="group_not_found",
             ) from error
 
     if tricount is None:
-        raise TricountError("Ce tricount est introuvable.", status=404, code="group_not_found")
+        raise TricountError("This tricount cannot be found.", status=404, code="group_not_found")
 
     return {
         "id": code,
@@ -162,7 +161,7 @@ def fetch_group(code: str) -> dict[str, Any]:
 
 
 def parse_date(raw: Any) -> datetime:
-    """Date d'achat du ticket ; à défaut, maintenant."""
+    """Purchase date of the receipt; failing that, now."""
     if isinstance(raw, str) and raw:
         for pattern in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
             try:
@@ -181,19 +180,19 @@ def create_expense(
     date: str | None,
 ) -> str:
     """
-    Crée une dépense unique, répartie selon les montants fournis.
+    Create a single expense, split according to the amounts provided.
 
-    Les parts arrivent avec des **uuid de membres**, plus des noms : l'ancien
-    appariement par libellé — et sa fragilité au moindre accent — n'existe plus.
+    Shares arrive with **member uuids**, not names: the old matching by label —
+    and its fragility to the slightest accent — is gone.
 
-    Garde-fou : mieux vaut ne rien envoyer qu'une dépense qui ne tombe pas
-    juste. Le client vérifie déjà, mais il s'agit d'argent.
+    Guardrail: better to send nothing than an expense that does not add up. The
+    client already checks, but this is money.
     """
     if total_cents <= 0 or not shares:
-        raise TricountError("Dépense vide.", status=400, code="empty_expense")
+        raise TricountError("Empty expense.", status=400, code="empty_expense")
     if sum(amount for _, amount in shares) != total_cents:
         raise TricountError(
-            "La répartition ne correspond pas au total.", status=400, code="split_mismatch"
+            "The split does not match the total.", status=400, code="split_mismatch"
         )
 
     client = get_client()
@@ -204,7 +203,7 @@ def create_expense(
         member = by_uuid.get(uuid)
         if member is None:
             raise TricountError(
-                "Un participant ne fait plus partie de ce tricount. Rafraîchissez les membres.",
+                "A participant is no longer part of this tricount. Refresh the members.",
                 status=409,
                 code="member_gone",
             )
@@ -217,7 +216,7 @@ def create_expense(
         "create_transaction_custom_split",
         client.create_transaction_custom_split,
         tricount=tricount,
-        description=description or "Ticket",
+        description=description or "Receipt",
         amount=total_cents / 100,
         payer=payer,
         allocations=allocations,

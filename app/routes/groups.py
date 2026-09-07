@@ -1,14 +1,13 @@
 """
-Groupes : un groupe **est** un tricount, désigné par son code d'invitation.
+Groups: a group **is** a tricount, designated by its invitation code.
 
-Rejoindre revient à coller un lien. L'API lit alors les membres chez Tricount et
-les met en cache : c'est là tout le « moins de setup » recherché — plus personne
-ne ressaisit à la main la liste des participants.
+Joining amounts to pasting a link. The API then reads the members from Tricount
+and caches them: that is the whole "less setup" we were after — nobody types the
+list of participants in by hand any more.
 
-Règle de portée, sans exception : la liste des groupes d'un utilisateur vient de
-`group_access`, jamais de `list_tricounts()`. Le robot Tricount est partagé par
-toute l'instance ; l'interroger reviendrait à montrer à chacun les groupes de
-tous les autres.
+Scope rule, without exception: a user's list of groups comes from `group_access`,
+never from `list_tricounts()`. The Tricount bot is shared by the whole instance;
+querying it would amount to showing everyone everybody else's groups.
 """
 
 from __future__ import annotations
@@ -18,16 +17,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from .. import auth, db, tricount_client
 from ..models import Group, GroupSummary, JoinGroupRequest, Member
 
-router = APIRouter(prefix="/v1/groups", tags=["groupes"])
+router = APIRouter(prefix="/v1/groups", tags=["groups"])
 
 
 def require_access(group_id: str, owner: auth.Owner) -> None:
     """
-    Garde-barrière de toutes les routes liées à un groupe.
+    Gatekeeper for every group-related route.
 
-    Répond 404, pas 403 : ne pas y avoir accès et ne pas exister doivent être
-    indiscernables, faute de quoi la réponse confirmerait l'existence d'un
-    groupe à qui n'y a rien à faire.
+    Answers 404, not 403: having no access and not existing must be
+    indistinguishable, otherwise the response would confirm the existence of a
+    group to someone with no business knowing about it.
     """
     row = db.query_one(
         "SELECT 1 FROM group_access WHERE group_id = ? AND owner_type = ? AND owner_id = ?",
@@ -35,7 +34,7 @@ def require_access(group_id: str, owner: auth.Owner) -> None:
     )
     if row is None:
         raise HTTPException(
-            status_code=404, detail={"code": "group_not_found", "reason": "Groupe introuvable."}
+            status_code=404, detail={"code": "group_not_found", "reason": "Group not found."}
         )
 
 
@@ -51,7 +50,7 @@ def _load(group_id: str) -> Group:
     row = db.query_one("SELECT * FROM tricount_group WHERE id = ?", (group_id,))
     if row is None:
         raise HTTPException(
-            status_code=404, detail={"code": "group_not_found", "reason": "Groupe introuvable."}
+            status_code=404, detail={"code": "group_not_found", "reason": "Group not found."}
         )
     count, last = _stats(group_id)
     return Group(
@@ -66,7 +65,7 @@ def _load(group_id: str) -> Group:
 
 
 def _persist(snapshot: dict, stamp: str) -> None:
-    """Écrit ou rafraîchit l'instantané d'un tricount."""
+    """Write or refresh the snapshot of a tricount."""
     db.execute(
         "INSERT INTO tricount_group (id, tricount_uuid, title, currency, members_json,"
         " members_synced_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -107,21 +106,21 @@ def list_groups(owner: auth.Owner = Depends(auth.current_owner)) -> list[GroupSu
                 lastActivityAt=last,
             )
         )
-    # Le groupe où il s'est passé quelque chose récemment remonte en tête.
+    # The group where something happened recently comes to the top.
     summaries.sort(key=lambda entry: entry.lastActivityAt or "", reverse=True)
     return summaries
 
 
 @router.post("", response_model=Group, status_code=201)
 def join_group(body: JoinGroupRequest, owner: auth.Owner = Depends(auth.current_owner)) -> Group:
-    """Rejoint un groupe depuis un lien de partage Tricount, ou depuis le code nu."""
+    """Join a group from a Tricount share link, or from the bare code."""
     code = tricount_client.parse_share_code(body.shareUrl)
     if code is None:
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "invalid_share_url",
-                "reason": "Lien de partage invalide. Collez un lien tricount.com ou son code.",
+                "reason": "Invalid share link. Paste a tricount.com link or its code.",
             },
         )
 
@@ -150,7 +149,7 @@ def read_group(group_id: str, owner: auth.Owner = Depends(auth.current_owner)) -
 
 @router.post("/{group_id}/members/refresh", response_model=Group)
 def refresh_members(group_id: str, owner: auth.Owner = Depends(auth.current_owner)) -> Group:
-    """Resynchronise les membres : quelqu'un a rejoint le tricount, ou changé de nom."""
+    """Resynchronise the members: someone joined the tricount, or changed their name."""
     require_access(group_id, owner)
     try:
         snapshot = tricount_client.fetch_group(group_id)
@@ -165,8 +164,8 @@ def refresh_members(group_id: str, owner: auth.Owner = Depends(auth.current_owne
 @router.delete("/{group_id}", status_code=204)
 def leave_group(group_id: str, owner: auth.Owner = Depends(auth.current_owner)) -> None:
     """
-    Retire l'accès du seul appelant. Le groupe et ses tickets restent pour les
-    autres membres : quitter n'est pas supprimer le travail de tout le monde.
+    Remove access for the caller only. The group and its receipts stay for the
+    other members: leaving is not deleting everyone else's work.
     """
     require_access(group_id, owner)
     db.execute(

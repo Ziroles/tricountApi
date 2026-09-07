@@ -1,9 +1,9 @@
 """
-Enrôlement d'appareil, comptes optionnels, réglages du propriétaire.
+Device enrolment, optional accounts, owner settings.
 
-Le parcours nominal ne demande rien à l'utilisateur : la PWA appelle
-`POST /v1/devices` à son premier lancement, garde le jeton, et c'est tout. Le
-compte n'entre en jeu que si l'on veut retrouver ses groupes ailleurs.
+The happy path asks the user for nothing: the PWA calls `POST /v1/devices` on
+its first launch, keeps the token, and that is all. An account only comes into
+play if you want to find your groups again elsewhere.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from ..models import (
     SettingsUpdate,
 )
 
-router = APIRouter(prefix="/v1", tags=["identité"])
+router = APIRouter(prefix="/v1", tags=["identity"])
 
 
 def settings_of(owner: auth.Owner) -> OwnerSettings:
@@ -39,10 +39,10 @@ def settings_of(owner: auth.Owner) -> OwnerSettings:
 
 def gemini_key_for(owner: auth.Owner) -> str:
     """
-    Clef effective : celle de l'utilisateur d'abord, celle de l'instance ensuite.
+    Effective key: the user's first, the instance's second.
 
-    L'ordre compte. Quelqu'un qui a pris la peine d'enregistrer sa clef veut que
-    ses lectures soient débitées chez lui, pas sur le quota partagé.
+    The order matters. Someone who went to the trouble of saving their own key
+    wants their reads billed to them, not to the shared quota.
     """
     row = db.query_one(
         "SELECT gemini_api_key_encrypted FROM owner_settings WHERE owner_type = ? AND owner_id = ?",
@@ -61,7 +61,7 @@ def model_for(owner: auth.Owner) -> str:
 
 @router.post("/devices", response_model=DeviceCreated, status_code=201)
 def create_device(x_signup_key: str | None = Header(default=None)) -> DeviceCreated:
-    """Enrôle un appareil. Le jeton n'est renvoyé qu'ici, et jamais relu."""
+    """Enrol a device. The token is returned here only, and never read back."""
     auth.check_signup_key(x_signup_key)
     device_id, token = auth.enrol_device()
     return DeviceCreated(deviceId=device_id, token=token)
@@ -81,9 +81,9 @@ def update_settings(
     body: SettingsUpdate, owner: auth.Owner = Depends(auth.current_owner)
 ) -> OwnerSettings:
     """
-    Met à jour les réglages. `geminiApiKey` absent laisse la clef en place ;
-    une chaîne vide l'efface. Distinguer les deux évite qu'un client qui ne
-    renvoie que le modèle ne fasse disparaître la clef au passage.
+    Update the settings. A missing `geminiApiKey` leaves the key in place; an
+    empty string clears it. Telling the two apart keeps a client that only sends
+    the model from wiping the key along the way.
     """
     db.execute(
         "INSERT OR IGNORE INTO owner_settings (owner_type, owner_id, updated_at) VALUES (?, ?, ?)",
@@ -102,7 +102,7 @@ def update_settings(
             try:
                 encrypted = crypto.encrypt(key)
             except crypto.SecretUnavailable as error:
-                # On refuse plutôt que d'écrire la clef d'un tiers en clair.
+                # We refuse rather than write someone else's key in the clear.
                 raise HTTPException(
                     status_code=503,
                     detail={"code": "secret_key_missing", "reason": str(error)},
@@ -125,7 +125,7 @@ def update_settings(
 
 @router.get("/models")
 def available_models(owner: auth.Owner = Depends(auth.current_owner)) -> list[dict[str, str]]:
-    """Modèles lisibles avec la clef effective — sert à valider la clef saisie."""
+    """Models readable with the effective key — used to validate the key entered."""
     try:
         return gemini.list_models(gemini_key_for(owner))
     except gemini.ExtractionError as error:
@@ -135,16 +135,16 @@ def available_models(owner: auth.Owner = Depends(auth.current_owner)) -> list[di
         ) from error
 
 
-# ── Comptes optionnels ────────────────────────────────────────────────────────
+# ── Optional accounts ─────────────────────────────────────────────────────────
 
 
 def _attach(owner: auth.Owner, account_id: str) -> None:
     """
-    Rattache l'appareil au compte et fait suivre ses accès aux groupes.
+    Attach the device to the account and carry its group access over.
 
-    Sans ce transfert, quelqu'un qui crée un compte après avoir rejoint des
-    groupes les verrait disparaître : ils resteraient rangés sous l'appareil,
-    tandis que la lecture se ferait désormais sous le compte.
+    Without this transfer, someone who creates an account after joining groups
+    would see them disappear: they would stay filed under the device, while
+    reads would now happen under the account.
     """
     with db.transaction() as connection:
         connection.execute("UPDATE device SET account_id = ? WHERE id = ?", (account_id, owner.device_id))
@@ -167,7 +167,7 @@ def create_account(
     if db.query_one("SELECT id FROM account WHERE email = ?", (email,)) is not None:
         raise HTTPException(
             status_code=409,
-            detail={"code": "email_taken", "reason": "Cette adresse est déjà utilisée."},
+            detail={"code": "email_taken", "reason": "This address is already in use."},
         )
     account_id = auth.new_id()
     db.execute(
@@ -180,14 +180,14 @@ def create_account(
 
 @router.post("/sessions", response_model=Me)
 def open_session(body: AccountCredentials, owner: auth.Owner = Depends(auth.current_owner)) -> Me:
-    """Rattache cet appareil à un compte existant, pour y retrouver ses groupes."""
+    """Attach this device to an existing account, to find its groups there."""
     row = db.query_one(
         "SELECT id, password_hash FROM account WHERE email = ?", (body.email.strip().lower(),)
     )
     if row is None or not auth.verify_password(body.password, row["password_hash"]):
         raise HTTPException(
             status_code=401,
-            detail={"code": "bad_credentials", "reason": "Adresse ou mot de passe incorrect."},
+            detail={"code": "bad_credentials", "reason": "Incorrect address or password."},
         )
     _attach(owner, row["id"])
     return read_me(auth.owner_of(owner.device_id, row["id"]))

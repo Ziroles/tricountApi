@@ -1,13 +1,13 @@
 """
-Montage des tests d'API.
+Test harness for the API.
 
-Deux tiers sont simulés, et pour deux raisons distinctes : Tricount parce qu'il
-n'existe pas d'environnement de test et qu'on ne va pas créer de vraies dépenses
-pour vérifier une route ; Gemini parce qu'une suite de tests ne doit ni coûter
-d'argent ni dépendre du réseau.
+Two third parties are faked, for two distinct reasons: Tricount because there is
+no test environment and we are not going to create real expenses to check a
+route; Gemini because a test suite must neither cost money nor depend on the
+network.
 
-La base et le dossier d'images sont recréés à chaque test : l'isolation prime
-sur la vitesse, et à cette échelle elle ne coûte rien.
+The database and the image directory are recreated for every test: isolation
+wins over speed, and at this scale it costs nothing.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     monkeypatch.setenv("SPLITTICKET_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SPLITTICKET_DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setenv("SPLITTICKET_IMAGES_DIR", str(tmp_path / "images"))
-    monkeypatch.setenv("SPLITTICKET_SECRET_KEY", "clef-de-test-pour-le-chiffrement")
+    monkeypatch.setenv("SPLITTICKET_SECRET_KEY", "test-key-for-encryption")
     monkeypatch.setenv("SPLITTICKET_ALLOWED_ORIGINS", "*")
     monkeypatch.delenv("SPLITTICKET_SIGNUP_KEY", raising=False)
     monkeypatch.delenv("TRICOUNT_RELAY_KEY", raising=False)
@@ -35,8 +35,8 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
 
     importlib.reload(config)
     db.reset_connection()
-    # `db` et les routes ont capturé `config` à l'import : on les recharge pour
-    # qu'ils voient les chemins du test, pas ceux du module chargé en premier.
+    # `db` and the routes captured `config` at import time: reload them so they
+    # see the test's paths, not those of the module loaded first.
     importlib.reload(db)
     from app import auth, crypto, tricount_client
     from app.routes import groups, identity, receipts
@@ -61,26 +61,26 @@ class FakeMember:
 class FakeTricount:
     def __init__(self) -> None:
         self.uuid = "tricount-uuid-1"
-        self.title = "Colocation"
+        self.title = "Flatshare"
         self.currency = "CAD"
         self.members = [
             FakeMember("m-lea", "Léa"),
             FakeMember("m-mathieu", "Mathieu"),
-            FakeMember("m-parti", "Ancien", status="DELETED"),
+            FakeMember("m-gone", "Former", status="DELETED"),
         ]
 
 
 @pytest.fixture
 def tricount(env: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
-    """Remplace le client Tricount et retient les dépenses créées."""
+    """Replace the Tricount client and record the expenses created."""
     from app import tricount_client
 
     created: list[dict[str, Any]] = []
 
     class FakeClient:
         def get_tricount(self, code: str) -> FakeTricount:
-            if code == "tINCONNU":
-                raise RuntimeError("introuvable")
+            if code == "tUNKNOWN":
+                raise RuntimeError("not found")
             return FakeTricount()
 
         def join_tricount(self, code: str, fetch_full: bool = True) -> FakeTricount:
@@ -103,7 +103,7 @@ def client(env: Any, tricount: Any) -> Iterator[TestClient]:
 
 @pytest.fixture
 def device(client: TestClient) -> dict[str, str]:
-    """Un appareil enrôlé, avec l'en-tête d'autorisation prêt à l'emploi."""
+    """An enrolled device, with the authorization header ready to use."""
     response = client.post("/v1/devices")
     assert response.status_code == 201, response.text
     token = response.json()["token"]
@@ -112,7 +112,7 @@ def device(client: TestClient) -> dict[str, str]:
 
 @pytest.fixture
 def other_device(client: TestClient) -> dict[str, str]:
-    """Un second appareil, pour vérifier qu'il ne voit rien de ce qui ne le regarde pas."""
+    """A second device, to check it sees nothing that is none of its business."""
     response = client.post("/v1/devices")
     return {"authorization": f"Bearer {response.json()['token']}"}
 

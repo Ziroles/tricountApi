@@ -1,15 +1,15 @@
 """
-Contrat HTTP : ce que l'API reçoit et ce qu'elle rend.
+HTTP contract: what the API accepts and what it returns.
 
-Les champs sont en camelCase : ils traversent le réseau vers du TypeScript, et
-c'est le client qui a raison sur la forme. Les types miroitent `src/types.ts`, à
-un détail près, mais un détail qui change tout :
+Field names are camelCase: they travel over the network to TypeScript, and the
+client is the one that is right about shape. The types mirror `src/types.ts`,
+with one detail apart — but a detail that changes everything:
 
     Assignment.personId  →  Assignment.memberUuid
 
-Une part n'est plus attribuée à une « personne » locale saisie à la main, mais à
-un **membre du tricount**, identifié par son uuid. L'appariement par nom, et sa
-fragilité au moindre accent, disparaît avec ce champ.
+A share is no longer assigned to a local "person" typed in by hand, but to a
+**tricount member**, identified by their uuid. Name matching, and its fragility
+to the slightest accent, disappears with this field.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ ReceiptStep = Literal["capture", "processing", "verify", "assign", "results"]
 AdjustmentMode = Literal["proportional", "assigned"]
 
 
-# ── Identité ──────────────────────────────────────────────────────────────────
+# ── Identity ──────────────────────────────────────────────────────────────────
 
 
 class DeviceCreated(BaseModel):
@@ -38,7 +38,7 @@ class AccountCredentials(BaseModel):
 
 
 class OwnerSettings(BaseModel):
-    """La clef Gemini n'apparaît jamais ici : seulement de quoi la reconnaître."""
+    """The Gemini key never appears here: only enough to recognise it."""
 
     hasGeminiKey: bool
     geminiKeyHint: str | None = None
@@ -47,7 +47,7 @@ class OwnerSettings(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    # None = ne pas toucher ; "" = effacer la clef enregistrée.
+    # None = leave untouched; "" = clear the saved key.
     geminiApiKey: str | None = None
     geminiModel: str | None = None
 
@@ -58,7 +58,7 @@ class Me(BaseModel):
     settings: OwnerSettings
 
 
-# ── Groupes ───────────────────────────────────────────────────────────────────
+# ── Groups ────────────────────────────────────────────────────────────────────
 
 
 class Member(BaseModel):
@@ -90,7 +90,7 @@ class GroupSummary(BaseModel):
     lastActivityAt: str | None
 
 
-# ── Tickets ───────────────────────────────────────────────────────────────────
+# ── Receipts ──────────────────────────────────────────────────────────────────
 
 
 class Assignment(BaseModel):
@@ -105,7 +105,7 @@ class ReceiptLine(BaseModel):
     quantity: int = Field(default=1, ge=1, le=999)
     unitPriceCents: int = 0
     totalCents: int = 0
-    # None = toutes les taxes du ticket s'appliquent ; [] = exonérée.
+    # None = every tax on the receipt applies; [] = exempt.
     taxCodes: list[str] | None = None
     assignments: list[Assignment] = []
     confidence: int = 100
@@ -129,7 +129,7 @@ class Adjustment(BaseModel):
 
 
 class ReceiptDocument(BaseModel):
-    """Le ticket tel que la PWA l'édite : un document, envoyé et reçu d'un bloc."""
+    """The receipt as the PWA edits it: one document, sent and received whole."""
 
     merchant: str | None = None
     purchaseDate: str | None = None
@@ -169,12 +169,12 @@ class ReceiptSummary(BaseModel):
 
 
 class ReceiptWrite(ReceiptDocument):
-    """Écriture d'un ticket : le document, plus la version qu'on croit modifier."""
+    """Writing a receipt: the document, plus the version we believe we are editing."""
 
     version: int = Field(ge=1)
 
 
-# ── Envoi vers Tricount ───────────────────────────────────────────────────────
+# ── Pushing to Tricount ───────────────────────────────────────────────────────
 
 
 class ShareInput(BaseModel):

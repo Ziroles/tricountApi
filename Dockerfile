@@ -6,12 +6,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SPLITTICKET_PORT=8787 \
     SPLITTICKET_DATA_DIR=/data
 
-# Utilisateur non-root : le service n'a besoin d'écrire que dans /data.
+# Non-root user: the service only needs to write to /data.
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
-# Base SQLite, photos des tickets et identifiants d'appareil Tricount.
+# SQLite database, receipt photos and Tricount device credentials.
 RUN mkdir -p /data && chown -R appuser:appuser /data /app
 
 COPY requirements.txt .

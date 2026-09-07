@@ -1,19 +1,20 @@
 """
-Tickets : création, lecture, écriture, photo, lecture OCR, envoi vers Tricount.
+Receipts: creation, reading, writing, photo, OCR scan, push to Tricount.
 
-Un ticket appartient au **groupe**, pas à l'appareil qui l'a créé : tout membre
-du groupe le voit et peut le corriger. C'est ce qui rend le groupe utile, et ce
-qui impose le verrou optimiste ci-dessous.
+A receipt belongs to the **group**, not to the device that created it: every
+member of the group sees it and can correct it. That is what makes the group
+useful, and what forces the optimistic lock below.
 
-**Concurrence.** Chaque écriture porte la `version` que le client croit
-modifier. Si le serveur a bougé entre-temps, il répond 409 en joignant le ticket
-courant, et c'est au client d'annoncer que quelqu'un d'autre est passé. Rien
-n'est écrasé en silence : il s'agit d'argent, pas d'un brouillon.
+**Concurrency.** Every write carries the `version` the client believes it is
+editing. If the server has moved on in the meantime, it answers 409 with the
+current receipt attached, and it is up to the client to announce that someone
+else got there first. Nothing is overwritten silently: this is money, not a
+draft.
 
-**Le calcul reste au client.** `settle()` est déterministe à partir du document,
-et il alimente une UI vivante — le curseur de pourboire recalcule à chaque
-frappe. Le serveur ne le refait pas ; il revérifie l'invariant à l'envoi, là où
-une erreur deviendrait irréversible.
+**The computation stays on the client.** `settle()` is deterministic from the
+document, and it feeds a live UI — the tip slider recomputes on every keystroke.
+The server does not redo it; it rechecks the invariant on push, where a mistake
+would become irreversible.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ from .identity import gemini_key_for, model_for
 
 logger = logging.getLogger("splitticket.receipts")
 
-router = APIRouter(prefix="/v1", tags=["tickets"])
+router = APIRouter(prefix="/v1", tags=["receipts"])
 
 DOCUMENT_FIELDS = (
     "merchant",
@@ -58,11 +59,11 @@ ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "i
 
 def receipt_total_cents(document: dict) -> int:
     """
-    Total du ticket : sous-total + taxes + ajustements.
+    Receipt total: subtotal + taxes + adjustments.
 
-    Miroir de `receiptTotal` (`src/lib/compute.ts`). Le pourboire n'y entre pas —
-    il ne figure pas sur le ticket imprimé, donc pas dans le montant qui le
-    représente dans une liste.
+    Mirror of `receiptTotal` (`src/lib/compute.ts`). The tip is not part of it —
+    it does not appear on the printed receipt, so it is not part of the amount
+    that represents it in a list.
     """
     lines = sum(int(line.get("totalCents") or 0) for line in document.get("lines") or [])
     taxes = sum(int(tax.get("amountCents") or 0) for tax in document.get("taxes") or [])
@@ -89,9 +90,9 @@ def _fetch(receipt_id: str, owner: auth.Owner):
     row = db.query_one("SELECT * FROM receipt WHERE id = ?", (receipt_id,))
     if row is None:
         raise HTTPException(
-            status_code=404, detail={"code": "receipt_not_found", "reason": "Ticket introuvable."}
+            status_code=404, detail={"code": "receipt_not_found", "reason": "Receipt not found."}
         )
-    # L'accès au ticket passe par l'accès au groupe : il n'y a pas d'autre porte.
+    # Access to a receipt goes through access to the group: there is no other door.
     require_access(row["group_id"], owner)
     return row
 
@@ -158,7 +159,7 @@ def list_receipts(
 def create_receipt(
     group_id: str, body: ReceiptWrite | None = None, owner: auth.Owner = Depends(auth.current_owner)
 ) -> Receipt:
-    """Crée un ticket. Le corps est facultatif : sans lui, on repart d'un brouillon vide."""
+    """Create a receipt. The body is optional: without it, we start from an empty draft."""
     require_access(group_id, owner)
     document = body.model_dump(exclude={"version"}) if body else ReceiptWrite(version=1).model_dump(
         exclude={"version"}
@@ -202,13 +203,13 @@ def write_receipt(
 ) -> Receipt:
     row = _fetch(receipt_id, owner)
     if body.version != row["version"]:
-        # On rend le ticket courant : le client a de quoi expliquer et reprendre,
-        # plutôt qu'un simple refus qui lui ferait perdre la main.
+        # We return the current receipt: the client has what it needs to explain
+        # and pick up again, rather than a bare refusal that would strand it.
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "version_conflict",
-                "reason": "Ce ticket a été modifié ailleurs.",
+                "reason": "This receipt was modified elsewhere.",
                 "current": _row_to_receipt(row).model_dump(),
             },
         )
@@ -222,10 +223,10 @@ def delete_receipt(receipt_id: str, owner: auth.Owner = Depends(auth.current_own
     db.execute("DELETE FROM receipt WHERE id = ?", (receipt_id,))
     db.execute("DELETE FROM image WHERE receipt_id = ?", (receipt_id,))
     if image:
-        # La photo suit le ticket : la laisser traîner sur le disque serait une
-        # fuite silencieuse de ce que l'utilisateur croit avoir effacé.
+        # The photo follows the receipt: leaving it lying on disk would be a
+        # silent leak of what the user believes they deleted.
         (config.IMAGES_DIR / image["path"]).unlink(missing_ok=True)
-    logger.info("ticket %s supprimé du groupe %s", receipt_id, row["group_id"])
+    logger.info("receipt %s deleted from group %s", receipt_id, row["group_id"])
 
 
 # ── Photo ─────────────────────────────────────────────────────────────────────
@@ -242,18 +243,18 @@ async def upload_image(
     content = await file.read()
     if len(content) == 0:
         raise HTTPException(
-            status_code=400, detail={"code": "empty_image", "reason": "Image vide."}
+            status_code=400, detail={"code": "empty_image", "reason": "Empty image."}
         )
     if len(content) > config.MAX_IMAGE_BYTES:
         raise HTTPException(
             status_code=413,
-            detail={"code": "image_too_large", "reason": "Photo trop lourde."},
+            detail={"code": "image_too_large", "reason": "Photo too large."},
         )
     mime = (file.content_type or "image/jpeg").split(";")[0].strip().lower()
     if mime not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             status_code=415,
-            detail={"code": "unsupported_image", "reason": f"Format non pris en charge : {mime}."},
+            detail={"code": "unsupported_image", "reason": f"Unsupported format: {mime}."},
         )
 
     config.ensure_directories()
@@ -280,12 +281,12 @@ def read_image(receipt_id: str, owner: auth.Owner = Depends(auth.current_owner))
     record = db.query_one("SELECT path, mime FROM image WHERE receipt_id = ?", (receipt_id,))
     if record is None:
         raise HTTPException(
-            status_code=404, detail={"code": "image_not_found", "reason": "Aucune photo."}
+            status_code=404, detail={"code": "image_not_found", "reason": "No photo."}
         )
     blob = config.IMAGES_DIR / record["path"]
     if not blob.exists():
         raise HTTPException(
-            status_code=404, detail={"code": "image_not_found", "reason": "Photo introuvable."}
+            status_code=404, detail={"code": "image_not_found", "reason": "Photo not found."}
         )
     return Response(
         content=blob.read_bytes(),
@@ -294,30 +295,30 @@ def read_image(receipt_id: str, owner: auth.Owner = Depends(auth.current_owner))
     )
 
 
-# ── Lecture du ticket ─────────────────────────────────────────────────────────
+# ── Reading the receipt ───────────────────────────────────────────────────────
 
 
 @router.post("/receipts/{receipt_id}/scan", response_model=Receipt)
 def scan_receipt(receipt_id: str, owner: auth.Owner = Depends(auth.current_owner)) -> Receipt:
     """
-    Lit la photo déjà envoyée et **écrit le résultat sur le ticket**.
+    Read the photo already uploaded and **write the result onto the receipt**.
 
-    Persister plutôt que de se contenter de répondre change une chose concrète :
-    si la connexion tombe pendant les quinze secondes du modèle, rouvrir le
-    ticket montre la lecture. Le travail n'est pas perdu avec la requête.
+    Persisting rather than merely answering changes something concrete: if the
+    connection drops during the fifteen seconds the model takes, reopening the
+    receipt shows the reading. The work is not lost with the request.
     """
     row = _fetch(receipt_id, owner)
     record = db.query_one("SELECT path, mime FROM image WHERE receipt_id = ?", (receipt_id,))
     if record is None:
         raise HTTPException(
             status_code=400,
-            detail={"code": "image_missing", "reason": "Aucune photo à lire sur ce ticket."},
+            detail={"code": "image_missing", "reason": "No photo to read on this receipt."},
         )
     blob = config.IMAGES_DIR / record["path"]
     if not blob.exists():
         raise HTTPException(
             status_code=404,
-            detail={"code": "image_not_found", "reason": "La photo n'est plus disponible."},
+            detail={"code": "image_not_found", "reason": "The photo is no longer available."},
         )
 
     try:
@@ -356,7 +357,7 @@ def scan_receipt(receipt_id: str, owner: auth.Owner = Depends(auth.current_owner
         }
         for tax in result.taxes
     ]
-    # Ce que l'utilisateur a déjà saisi prime sur ce que le modèle propose.
+    # What the user already entered wins over what the model proposes.
     document["merchant"] = document.get("merchant") or result.merchant
     document["purchaseDate"] = document.get("purchaseDate") or result.purchaseDate
     document["statedSubtotalCents"] = result.statedSubtotalCents
@@ -366,7 +367,7 @@ def scan_receipt(receipt_id: str, owner: auth.Owner = Depends(auth.current_owner
     return _write(row, document)
 
 
-# ── Envoi vers Tricount ───────────────────────────────────────────────────────
+# ── Pushing to Tricount ───────────────────────────────────────────────────────
 
 
 @router.post("/receipts/{receipt_id}/push", response_model=PushExpenseResponse)
@@ -375,7 +376,7 @@ def push_receipt(
     body: PushExpenseRequest,
     owner: auth.Owner = Depends(auth.current_owner),
 ) -> PushExpenseResponse:
-    """Crée la dépense dans le tricount du groupe, parts attribuées par uuid de membre."""
+    """Create the expense in the group's tricount, shares assigned by member uuid."""
     row = _fetch(receipt_id, owner)
     try:
         transaction_id = tricount_client.create_expense(

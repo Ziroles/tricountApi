@@ -1,14 +1,14 @@
 """
-Base SQLite : connexion, schéma, migrations.
+SQLite database: connection, schema, migrations.
 
-Le schéma est appliqué par `user_version`, le compteur que SQLite tient lui-même.
-Chaque migration est une fonction ; on n'en réécrit jamais une déjà livrée, on en
-ajoute une à la suite.
+The schema is applied through `user_version`, the counter SQLite keeps itself.
+Each migration is a function; a shipped migration is never rewritten, a new one
+is appended instead.
 
-Choix de fond : un ticket est stocké comme **un document JSON** (`document`)
-flanqué des seules colonnes que la vue liste doit trier ou filtrer. La PWA édite
-le ticket d'un bloc et `settle()` le consomme d'un bloc ; le découper en tables
-imposerait des dizaines d'endpoints de patch pour aucun gain de lecture.
+Core choice: a receipt is stored as **one JSON document** (`document`) flanked
+only by the columns the list view needs to sort or filter on. The PWA edits the
+receipt as a whole and `settle()` consumes it as a whole; splitting it into
+tables would require dozens of patch endpoints for no gain on reads.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def migration(sql: str) -> None:
     _MIGRATIONS.append(sql)
 
 
-# ── v1 — socle : appareils, comptes, groupes, tickets, images ─────────────────
+# ── v1 — foundation: devices, accounts, groups, receipts, images ──────────────
 
 migration(
     """
@@ -48,8 +48,8 @@ migration(
     );
     CREATE INDEX device_account ON device(account_id);
 
-    -- L'identifiant d'un groupe EST le code d'invitation Tricount : c'est la
-    -- clef naturelle, stable, et celle que l'utilisateur colle depuis un lien.
+    -- A group's id IS the Tricount invitation code: it is the natural, stable
+    -- key, and the one the user pastes from a link.
     CREATE TABLE tricount_group (
         id                TEXT PRIMARY KEY,
         tricount_uuid     TEXT,
@@ -60,9 +60,9 @@ migration(
         created_at        TEXT NOT NULL
     );
 
-    -- Un groupe est accessible soit à un appareil, soit à un compte. Rattacher
-    -- un appareil à un compte fait basculer ses accès vers le compte, ce qui
-    -- suffit à les rendre visibles depuis un second appareil.
+    -- A group is reachable either by a device or by an account. Attaching a
+    -- device to an account moves its access over to the account, which is all
+    -- it takes for the groups to show up on a second device.
     CREATE TABLE group_access (
         group_id   TEXT NOT NULL REFERENCES tricount_group(id) ON DELETE CASCADE,
         owner_type TEXT NOT NULL CHECK (owner_type IN ('device', 'account')),
@@ -105,8 +105,8 @@ migration(
     );
     CREATE INDEX image_receipt ON image(receipt_id);
 
-    -- Réglages par propriétaire (appareil ou compte). La clef Gemini y est
-    -- stockée chiffrée, jamais en clair, et n'en ressort jamais entière.
+    -- Per-owner settings (device or account). The Gemini key is stored here
+    -- encrypted, never in the clear, and never comes back out in full.
     CREATE TABLE owner_settings (
         owner_type              TEXT NOT NULL,
         owner_id                TEXT NOT NULL,
@@ -124,14 +124,14 @@ _connection: sqlite3.Connection | None = None
 
 
 def connect() -> sqlite3.Connection:
-    """Connexion unique du processus, configurée une fois."""
+    """Single connection for the process, configured once."""
     global _connection
     if _connection is None:
         config.ensure_directories()
         _connection = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         _connection.row_factory = sqlite3.Row
-        # WAL : les lectures ne bloquent pas l'écriture en cours. Utile dès que
-        # deux membres d'un groupe consultent pendant qu'un troisième édite.
+        # WAL: reads do not block the write in progress. Useful as soon as two
+        # members of a group are browsing while a third one edits.
         _connection.execute("PRAGMA journal_mode = WAL")
         _connection.execute("PRAGMA foreign_keys = ON")
         _connection.execute("PRAGMA busy_timeout = 5000")
@@ -140,7 +140,7 @@ def connect() -> sqlite3.Connection:
 
 
 def reset_connection() -> None:
-    """Referme la connexion. Utilisé par les tests pour repartir d'une base neuve."""
+    """Close the connection. Used by the tests to start from a fresh database."""
     global _connection
     if _connection is not None:
         _connection.close()
@@ -148,7 +148,7 @@ def reset_connection() -> None:
 
 
 def migrate(connection: sqlite3.Connection) -> None:
-    """Applique les migrations manquantes, dans l'ordre, une transaction chacune."""
+    """Apply the missing migrations, in order, one transaction each."""
     current = connection.execute("PRAGMA user_version").fetchone()[0]
     for index, sql in enumerate(_MIGRATIONS[current:], start=current + 1):
         with connection:
@@ -158,7 +158,7 @@ def migrate(connection: sqlite3.Connection) -> None:
 
 @contextmanager
 def transaction() -> Iterator[sqlite3.Connection]:
-    """Bloc transactionnel : tout ou rien."""
+    """Transactional block: all or nothing."""
     connection = connect()
     with connection:
         yield connection
@@ -179,7 +179,7 @@ def execute(sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
 
 
 def loads(raw: str | None, fallback: Any) -> Any:
-    """Colonne JSON → objet Python, en tolérant une colonne vide ou abîmée."""
+    """JSON column → Python object, tolerating an empty or damaged column."""
     if not raw:
         return fallback
     try:

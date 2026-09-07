@@ -1,9 +1,9 @@
 """
-Contrat de sortie de l'extraction, consommé tel quel par la PWA.
+Output contract of the extraction, consumed as-is by the PWA.
 
-Les noms de champs sont en camelCase parce qu'ils traversent le réseau vers du
-TypeScript : c'est le client qui a raison sur la forme, pas la convention
-Python. `ExtractionResult` est le miroir exact de `src/extraction/types.ts`.
+Field names are camelCase because they travel over the network to TypeScript:
+the client is right about shape here, not the Python convention.
+`ExtractionResult` is the exact mirror of `src/extraction/types.ts`.
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ class ExtractedLine(BaseModel):
     quantity: int
     unitPriceCents: int
     totalCents: int
-    # None = « toutes les taxes du ticket s'appliquent », [] = exonérée,
-    # liste = codes applicables. Le modèle ne produit aujourd'hui que les deux
-    # premiers cas ; le troisième reste ouvert pour la saisie manuelle.
+    # None = "every tax on the receipt applies", [] = exempt, list = applicable
+    # codes. The model only produces the first two cases today; the third stays
+    # open for manual entry.
     taxCodes: list[str] | None
     confidence: int
 
@@ -40,8 +40,8 @@ class ExtractionResult(BaseModel):
     statedTotalCents: int | None = None
     merchant: str | None = None
     purchaseDate: str | None = None
-    # Lignes que le modèle a produites mais qu'on a refusé de retenir : mieux
-    # vaut les nommer à l'utilisateur que de les faire disparaître en silence.
+    # Lines the model produced but we refused to keep: better to name them to
+    # the user than to make them vanish silently.
     discarded: list[str] = []
 
 

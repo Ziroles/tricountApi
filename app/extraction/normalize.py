@@ -1,14 +1,13 @@
 """
-Assainissement de la sortie du modèle de vision.
+Sanitising the vision model's output.
 
-Portage fidèle de `src/extraction/normalize.ts`. C'est le seul endroit où une
-réponse de modèle devient une donnée de confiance : tout ce qui vient de Gemini
-passe ici, et rien n'en sort qui n'ait été vérifié.
+A faithful port of `src/extraction/normalize.ts`. This is the only place where a
+model response becomes trusted data: everything coming out of Gemini goes
+through here, and nothing leaves that has not been checked.
 
-Le principe directeur, hérité du client : une sortie de modèle est *plausible*
-par construction, donc non vérifiée par défaut. Une ligne sans montant lisible
-est écartée, pas ramenée à zéro — un zéro se fond dans un total, une ligne
-manquante se voit.
+The guiding principle, inherited from the client: a model output is *plausible*
+by construction, therefore unverified by default. A line without a readable
+amount is dropped, not zeroed — a zero blends into a total, a missing line shows.
 """
 
 from __future__ import annotations
@@ -32,9 +31,9 @@ from .types import ExtractedLine, ExtractedTax, ExtractionResult, empty_extracti
 CONFIDENCE_SURE = 95
 CONFIDENCE_UNSURE = 50
 
-# L'ordre compte : on retient le premier alias dont le libellé est préfixé.
-# TPS avant GST, TVQ avant QST — deux écritures d'une même taxe doivent tomber
-# sur un code unique, sans quoi elles seraient comptées deux fois.
+# Order matters: we keep the first alias the label starts with. TPS before GST,
+# TVQ before QST — two spellings of the same tax must land on a single code,
+# otherwise they would be counted twice.
 TAX_ALIASES: dict[str, str] = {
     "TPS": "TPS",
     "GST": "TPS",
@@ -52,7 +51,7 @@ _NON_LETTERS = re.compile(r"[^A-Z]")
 
 
 def _stringify(value: Any) -> str:
-    """`JSON.stringify`, pour nommer une ligne écartée qui n'a même pas de libellé."""
+    """`JSON.stringify`, to name a dropped line that does not even have a label."""
     try:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     except (TypeError, ValueError):
@@ -60,7 +59,7 @@ def _stringify(value: Any) -> str:
 
 
 def as_string(value: Any) -> str | None:
-    """Chaîne non vide, ou None. Un booléen n'est pas du texte et ne le devient pas."""
+    """Non-empty string, or None. A boolean is not text and does not become one."""
     if isinstance(value, str):
         trimmed = value.strip()
         return None if trimmed == "" else trimmed
@@ -73,12 +72,12 @@ def as_string(value: Any) -> str | None:
 
 def as_cents(value: Any) -> int | None:
     """
-    Montant du modèle → centimes.
+    Model amount → cents.
 
-    Le modèle répond en JSON : 3,33 peut y arriver sous la forme
-    3.3300000000000005, et un montant à trois décimales doit s'arrondir au
-    centime — le rejeter ferait disparaître la ligne du ticket. La saisie
-    manuelle, elle, reste stricte (`parse_amount_to_cents`).
+    The model answers in JSON: 3.33 can arrive as 3.3300000000000005, and an
+    amount with three decimals must round to the cent — rejecting it would make
+    the line disappear from the receipt. Manual entry, on the other hand, stays
+    strict (`parse_amount_to_cents`).
     """
     if isinstance(value, bool):
         return None
@@ -101,8 +100,8 @@ def as_cents(value: Any) -> int | None:
 
 def parse_rate_percent(value: Any) -> float | None:
     """
-    Taux affiché en pied de ticket. Il n'est qu'un indice : le montant imprimé
-    fait foi. Hors de ]0 ; 30], c'est une lecture fautive, pas un taux.
+    Rate printed at the foot of the receipt. It is only a hint: the printed
+    amount is what counts. Outside ]0 ; 30], it is a misreading, not a rate.
     """
     text = as_string(value)
     if text is None:
@@ -114,20 +113,20 @@ def parse_rate_percent(value: Any) -> float | None:
 
 
 def canonical_tax_code(label: str) -> str:
-    """« TVQ 9,975 % », « QST » et « qst » désignent la même taxe : un seul code."""
+    """`TVQ 9,975 %`, `QST` and `qst` name the same tax: one single code."""
     key = unicodedata.normalize("NFD", label)
     key = "".join(ch for ch in key if not unicodedata.combining(ch))
     key = _NON_LETTERS.sub("", key.upper())
     for alias, code in TAX_ALIASES.items():
         if key.startswith(alias):
             return code
-    return "TAXE" if key == "" else key[:6]
+    return "TAX" if key == "" else key[:6]
 
 
 def normalize_taxes(raw: Any) -> list[ExtractedTax]:
     """
-    Taxes du pied de ticket. Une taxe imprimée deux fois est *additionnée*, non
-    choisie : deux lignes TPS sur un même ticket sont deux montants réels.
+    Taxes from the foot of the receipt. A tax printed twice is *summed*, not
+    picked: two GST lines on the same receipt are two real amounts.
     """
     if not isinstance(raw, list):
         return []
@@ -138,7 +137,7 @@ def normalize_taxes(raw: Any) -> list[ExtractedTax]:
             continue
         label = as_string(item.get("label"))
         amount_cents = as_cents(item.get("amount"))
-        # Une taxe sans montant lisible n'est pas une taxe à zéro : on l'écarte.
+        # A tax without a readable amount is not a zero tax: we drop it.
         if label is None or amount_cents is None:
             continue
         code = canonical_tax_code(label)
@@ -158,7 +157,7 @@ def normalize_taxes(raw: Any) -> list[ExtractedTax]:
 
 
 def as_quantity(value: Any) -> int:
-    """Quantité plausible, ou 1. Une quantité aberrante ne doit pas tuer la ligne."""
+    """Plausible quantity, or 1. An absurd quantity must not kill the line."""
     if isinstance(value, bool):
         quantity = math.nan
     elif isinstance(value, (int, float)):
@@ -173,7 +172,7 @@ def as_quantity(value: Any) -> int:
 
 
 def as_iso_date(value: Any) -> str | None:
-    """Date d'achat en AAAA-MM-JJ. Une date hors du plausible est une hallucination."""
+    """Purchase date in YYYY-MM-DD. A date outside the plausible is a hallucination."""
     text = as_string(value)
     if text is None:
         return None
@@ -187,7 +186,7 @@ def as_iso_date(value: Any) -> str | None:
 
 
 def normalize_line(raw: Any) -> ExtractedLine | str:
-    """Une ligne d'article, ou le libellé sous lequel elle a été écartée."""
+    """One item line, or the label under which it was dropped."""
     if not isinstance(raw, dict):
         return _stringify(raw)
 
@@ -195,21 +194,21 @@ def normalize_line(raw: Any) -> ExtractedLine | str:
     description = as_string(raw.get("description"))
     total_cents = as_cents(raw.get("total"))
 
-    # Sans montant, il n'y a rien à répartir : la ligne est nommée, pas inventée.
+    # Without an amount there is nothing to split: the line is named, not invented.
     if total_cents is None:
         return label if label is not None else _stringify(raw)
 
     quantity = as_quantity(raw.get("quantity"))
     unit_from_model = as_cents(raw.get("unitPrice"))
-    # Le prix unitaire du modèle n'est retenu que s'il tombe juste sur le total.
-    # Sinon c'est le total, seul montant réellement imprimé, qui fait foi.
+    # The model's unit price is only kept if it lands exactly on the total.
+    # Otherwise the total, the only amount actually printed, is what counts.
     if unit_from_model is not None and unit_from_model * quantity == total_cents:
         unit_price_cents = unit_from_model
     else:
         unit_price_cents = js_round(total_cents / quantity)
 
     return ExtractedLine(
-        label=label if label is not None else "Article",
+        label=label if label is not None else "Item",
         description=description,
         quantity=quantity,
         unitPriceCents=unit_price_cents,
@@ -220,7 +219,7 @@ def normalize_line(raw: Any) -> ExtractedLine | str:
 
 
 def normalize_extraction(raw: Any) -> ExtractionResult:
-    """Point d'entrée unique : sortie brute du modèle → résultat exploitable."""
+    """Single entry point: raw model output → usable result."""
     if not isinstance(raw, dict):
         return empty_extraction()
 

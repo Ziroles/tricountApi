@@ -6,8 +6,8 @@ on:
   pull_request:
 
 concurrency:
-  # Une nouvelle poussée annule la vérification de la précédente : ce qui compte
-  # est l'état de la branche maintenant, pas l'historique de ses états.
+  # A new push cancels the check for the previous one: what matters is the
+  # state of the branch now, not the history of its states.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
@@ -26,12 +26,12 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      - name: Installer les dépendances
+      - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
       - name: Tests
-        # Tricount et Gemini sont simulés : rien n'appelle le réseau, et aucune
-        # dépense réelle n'est créée.
+        # Tricount and Gemini are faked: nothing calls the network, and no real
+        # expense is created.
         run: pytest -q
 
   image:
@@ -40,10 +40,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Construire l'image
+      - name: Build the image
         run: docker build -t splitticket-api:ci .
 
-      - name: Vérifier que le service démarre et répond
+      - name: Check that the service starts and responds
         run: |
           docker run -d --name ci-api -p 8787:8787 \
             -e SPLITTICKET_SECRET_KEY=clef-de-verification-ci \
@@ -57,7 +57,7 @@ jobs:
             fi
             sleep 1
           done
-          echo "Le service n'a pas répondu en 30 s :"
+          echo "The service did not respond within 30s:"
           docker logs ci-api
           docker rm -f ci-api > /dev/null
           exit 1
