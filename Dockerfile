@@ -2,34 +2,30 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TRICOUNT_RELAY_HOST=0.0.0.0 \
-    TRICOUNT_RELAY_PORT=8787
+    SPLITTICKET_HOST=0.0.0.0 \
+    SPLITTICKET_PORT=8787 \
+    SPLITTICKET_DATA_DIR=/data
 
-# Création d'un utilisateur non-root pour la sécurité
+# Non-root user: the service only needs to write to /data.
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
-# Création du dossier pour persister les identifiants
+# SQLite database, receipt photos and Tricount device credentials.
 RUN mkdir -p /data && chown -R appuser:appuser /data /app
 
-# Installation des dépendances Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copie du code source
-COPY relay.py .
+COPY app ./app
 
-# Utilisation de l'utilisateur non-root
 USER appuser
 
-# Exposition du port du relais
 EXPOSE 8787
 
-# Configuration par défaut du chemin vers les credentials
-ENV TRICOUNT_CREDENTIALS_PATH=/data/.tricount-credentials.json
-
-# Volume pour conserver les identifiants générés
 VOLUME ["/data"]
 
-CMD ["python", "relay.py"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+  CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8787/health').read()" || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8787"]

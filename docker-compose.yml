@@ -1,17 +1,28 @@
 services:
-  tricount-api:
+  splitticket-api:
     build: .
-    container_name: tricount-api
+    container_name: splitticket-api
     restart: unless-stopped
     ports:
-      - "${TRICOUNT_RELAY_PORT:-8787}:8787"
+      - "${SPLITTICKET_PORT:-8787}:8787"
     volumes:
-      - tricount-data:/data
+      # SQLite database, receipt photos, Tricount device credentials.
+      # Losing this volume means losing the groups and the receipts.
+      - splitticket-data:/data
     environment:
-      - TRICOUNT_RELAY_HOST=0.0.0.0
-      - TRICOUNT_RELAY_PORT=8787
-      - TRICOUNT_RELAY_KEY=${TRICOUNT_RELAY_KEY:-}
-
+      - SPLITTICKET_HOST=0.0.0.0
+      - SPLITTICKET_PORT=8787
+      - SPLITTICKET_DATA_DIR=/data
+      # Required to store users' Gemini keys (encrypted).
+      - SPLITTICKET_SECRET_KEY=${SPLITTICKET_SECRET_KEY:-}
+      # Optional: closes enrolment of new devices.
+      - SPLITTICKET_SIGNUP_KEY=${SPLITTICKET_SIGNUP_KEY:-}
+      # Optional: fallback key for when a user has none of their own.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - SPLITTICKET_ALLOWED_ORIGINS=${SPLITTICKET_ALLOWED_ORIGINS:-*}
+      # Purge photos after N days. 0 = never (the volume grows without end).
+      - SPLITTICKET_IMAGE_RETENTION_DAYS=${SPLITTICKET_IMAGE_RETENTION_DAYS:-90}
 
 volumes:
-  tricount-data:
+  splitticket-data:
