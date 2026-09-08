@@ -13,6 +13,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from .conftest import CREDENTIALS
+
 
 # ── Identity ──────────────────────────────────────────────────────────────────
 
@@ -56,43 +58,62 @@ def test_the_instance_key_closes_enrolment(env: Any, monkeypatch: Any) -> None:
 # ── Gemini key ────────────────────────────────────────────────────────────────
 
 
-def test_a_saved_key_never_comes_back_out_in_full(
-    client: TestClient, device: dict[str, str]
+BLOB = "v1.ZmFrZS1pdg==.Y2lwaGVydGV4dC10aGUtc2VydmVyLWNhbm5vdC1yZWFk"
+
+
+def test_the_blob_comes_back_exactly_as_it_was_stored(
+    client: TestClient, account: dict[str, str]
 ) -> None:
-    client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyTOPSECRET12345"}, headers=device)
-    body = client.get("/v1/me", headers=device).json()
+    client.put("/v1/me/settings", json={"geminiKeyBlob": BLOB}, headers=account)
+    settings = client.get("/v1/me", headers=account).json()["settings"]
 
-    assert body["settings"]["hasGeminiKey"] is True
-    assert body["settings"]["geminiKeyHint"] == "AIza…345"
-    # The full key must not appear anywhere in the response.
-    assert "AIzaSyTOPSECRET12345" not in client.get("/v1/me", headers=device).text
+    # Verbatim: the server is a shelf, not a reader. It cannot parse this, and
+    # handing it back unchanged is the whole of its job.
+    assert settings["geminiKeyBlob"] == BLOB
 
 
-def test_updating_the_model_does_not_clear_the_key(
-    client: TestClient, device: dict[str, str]
+def test_storing_a_key_needs_an_account(client: TestClient, device: dict[str, str]) -> None:
+    """
+    No account means no password, and no password means nothing to derive a
+    decryption key from. Storing a blob nobody could ever open is worse than
+    refusing it.
+    """
+    response = client.put("/v1/me/settings", json={"geminiKeyBlob": BLOB}, headers=device)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "account_required"
+
+
+def test_updating_the_model_does_not_clear_the_blob(
+    client: TestClient, account: dict[str, str]
 ) -> None:
-    client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyABCDEFGH"}, headers=device)
-    client.put("/v1/me/settings", json={"geminiModel": "gemini-3-flash"}, headers=device)
+    client.put("/v1/me/settings", json={"geminiKeyBlob": BLOB}, headers=account)
+    client.put("/v1/me/settings", json={"geminiModel": "gemini-3-flash"}, headers=account)
 
-    settings = client.get("/v1/me", headers=device).json()["settings"]
-    assert settings["hasGeminiKey"] is True
+    settings = client.get("/v1/me", headers=account).json()["settings"]
+    assert settings["geminiKeyBlob"] == BLOB
     assert settings["geminiModel"] == "gemini-3-flash"
 
 
-def test_an_empty_string_clears_the_key(client: TestClient, device: dict[str, str]) -> None:
-    client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyABCDEFGH"}, headers=device)
-    client.put("/v1/me/settings", json={"geminiApiKey": ""}, headers=device)
-    assert client.get("/v1/me", headers=device).json()["settings"]["hasGeminiKey"] is False
+def test_an_empty_string_clears_the_blob(client: TestClient, account: dict[str, str]) -> None:
+    client.put("/v1/me/settings", json={"geminiKeyBlob": BLOB}, headers=account)
+    client.put("/v1/me/settings", json={"geminiKeyBlob": ""}, headers=account)
+    assert client.get("/v1/me", headers=account).json()["settings"]["geminiKeyBlob"] is None
 
 
-def test_the_key_is_encrypted_on_disk(
-    client: TestClient, device: dict[str, str], env: Any
+def test_no_route_accepts_a_plaintext_gemini_key(
+    client: TestClient, account: dict[str, str], env: Any
 ) -> None:
-    client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyTOPSECRET12345"}, headers=device)
+    """
+    The old contract took the key in the clear and encrypted it here. Sending it
+    that way must now be ignored outright — not stored, not encrypted, not
+    written anywhere.
+    """
+    client.put("/v1/me/settings", json={"geminiApiKey": "AIzaSyTOPSECRET12345"}, headers=account)
     from app import config
 
-    contents = config.DB_PATH.read_bytes()
-    assert b"AIzaSyTOPSECRET12345" not in contents
+    assert client.get("/v1/me", headers=account).json()["settings"]["geminiKeyBlob"] is None
+    assert b"AIzaSyTOPSECRET12345" not in config.DB_PATH.read_bytes()
 
 
 # ── Groups ────────────────────────────────────────────────────────────────────
@@ -286,6 +307,51 @@ def test_an_unsupported_image_format_is_refused(
     assert response.status_code == 415
 
 
+def test_a_reading_done_by_the_browser_is_sanitised_like_any_other(
+    client: TestClient, device: dict[str, str], group: str
+) -> None:
+    """
+    The user called Gemini themselves, with a key this server never saw. What
+    comes back is raw model output — untrusted, exactly as it was when we made
+    the call ourselves — so it goes through the same normalisation.
+    """
+    receipt = _new_receipt(client, device, group)
+    raw = """```json
+    {"merchant": "Chez Bob",
+     "lines": [{"label": "Poutine", "quantity": 2, "unitPrice": "9.50", "total": "19.00"}],
+     "taxes": [{"label": "TPS", "rate": "5", "amount": "0.95"}]}
+    ```"""
+
+    response = client.post(
+        f"/v1/receipts/{receipt['id']}/extraction", json={"rawText": raw}, headers=device
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["merchant"] == "Chez Bob"
+    assert body["step"] == "verify"
+    # Amounts arrive as text and leave as cents: the Markdown fence, the string
+    # prices and the missing ids are all handled on this side.
+    assert [(l["label"], l["quantity"], l["totalCents"]) for l in body["lines"]] == [
+        ("Poutine", 2, 1900)
+    ]
+    assert body["taxes"][0]["amountCents"] == 95
+    assert body["lines"][0]["id"]
+
+
+def test_unusable_model_output_is_refused_rather_than_written(
+    client: TestClient, device: dict[str, str], group: str
+) -> None:
+    receipt = _new_receipt(client, device, group)
+    response = client.post(
+        f"/v1/receipts/{receipt['id']}/extraction",
+        json={"rawText": "I'm sorry, I cannot read this receipt."},
+        headers=device,
+    )
+    assert response.status_code == 400
+    assert client.get(f"/v1/receipts/{receipt['id']}", headers=device).json()["lines"] == []
+
+
 def test_scanning_without_a_photo_says_so_clearly(
     client: TestClient, device: dict[str, str], group: str
 ) -> None:
@@ -392,26 +458,40 @@ def test_a_member_gone_from_the_tricount_stops_the_push(
 def test_an_account_finds_its_groups_again_from_another_device(
     client: TestClient, device: dict[str, str], other_device: dict[str, str], group: str
 ) -> None:
-    credentials = {"email": "Ziroles@example.com", "password": "a-strong-password"}
-    assert client.post("/v1/accounts", json=credentials, headers=device).status_code == 201
+    assert client.post("/v1/accounts", json=CREDENTIALS, headers=device).status_code == 201
 
     # The group joined before the account was created must have followed.
     assert [g["id"] for g in client.get("/v1/groups", headers=device).json()] == [group]
 
-    assert client.post("/v1/sessions", json=credentials, headers=other_device).status_code == 200
+    login = {"email": CREDENTIALS["email"], "proof": CREDENTIALS["proof"]}
+    assert client.post("/v1/sessions", json=login, headers=other_device).status_code == 200
     assert [g["id"] for g in client.get("/v1/groups", headers=other_device).json()] == [group]
 
 
-def test_a_wrong_password_attaches_nothing(
+def test_a_blob_saved_on_one_device_is_readable_on_the_next(
     client: TestClient, device: dict[str, str], other_device: dict[str, str]
 ) -> None:
-    client.post(
-        "/v1/accounts",
-        json={"email": "a@example.com", "password": "a-strong-password"},
-        headers=device,
-    )
+    """
+    The point of the whole arrangement: the key follows the account, while the
+    server holds only something it cannot open.
+    """
+    client.post("/v1/accounts", json=CREDENTIALS, headers=device)
+    client.put("/v1/me/settings", json={"geminiKeyBlob": BLOB}, headers=device)
+
+    login = {"email": CREDENTIALS["email"], "proof": CREDENTIALS["proof"]}
+    client.post("/v1/sessions", json=login, headers=other_device)
+
+    assert client.get("/v1/me", headers=other_device).json()["settings"]["geminiKeyBlob"] == BLOB
+
+
+def test_a_wrong_proof_attaches_nothing(
+    client: TestClient, device: dict[str, str], other_device: dict[str, str]
+) -> None:
+    client.post("/v1/accounts", json=CREDENTIALS, headers=device)
     response = client.post(
-        "/v1/sessions", json={"email": "a@example.com", "password": "not-the-right-one"}, headers=other_device
+        "/v1/sessions",
+        json={"email": CREDENTIALS["email"], "proof": "n" * 44},
+        headers=other_device,
     )
     assert response.status_code == 401
 
@@ -419,16 +499,40 @@ def test_a_wrong_password_attaches_nothing(
 def test_an_address_already_taken_is_refused(
     client: TestClient, device: dict[str, str], other_device: dict[str, str]
 ) -> None:
-    credentials = {"email": "a@example.com", "password": "a-strong-password"}
-    client.post("/v1/accounts", json=credentials, headers=device)
-    assert client.post("/v1/accounts", json=credentials, headers=other_device).status_code == 409
+    client.post("/v1/accounts", json=CREDENTIALS, headers=device)
+    assert client.post("/v1/accounts", json=CREDENTIALS, headers=other_device).status_code == 409
+
+
+def test_the_salt_of_an_account_is_the_one_it_was_created_with(
+    client: TestClient, device: dict[str, str]
+) -> None:
+    client.post("/v1/accounts", json=CREDENTIALS, headers=device)
+    response = client.post(
+        "/v1/accounts/salt", json={"email": CREDENTIALS["email"]}, headers=device
+    )
+    assert response.json()["kdfSalt"] == CREDENTIALS["kdfSalt"]
+
+
+def test_an_unknown_address_gets_a_stable_decoy_salt(
+    client: TestClient, device: dict[str, str]
+) -> None:
+    """
+    A 404 here would answer "does this person have an account?" to anyone who
+    asks. The decoy has to look like a salt, and has to be the same one twice —
+    a real salt does not change between two attempts either.
+    """
+    ask = lambda: client.post(  # noqa: E731
+        "/v1/accounts/salt", json={"email": "nobody@example.com"}, headers=device
+    ).json()["kdfSalt"]
+
+    first = ask()
+    assert first != "" and first == ask()
 
 
 def test_health_announces_what_the_instance_can_do(client: TestClient) -> None:
     body = client.get("/health").json()
     assert body["ok"] is True
     assert body["serverHasGeminiKey"] is False
-    assert body["canStoreUserKeys"] is True
 
 
 def test_an_unknown_code_talks_about_the_link_not_the_service(

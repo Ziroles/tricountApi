@@ -25,7 +25,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     monkeypatch.setenv("SPLITTICKET_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SPLITTICKET_DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setenv("SPLITTICKET_IMAGES_DIR", str(tmp_path / "images"))
-    monkeypatch.setenv("SPLITTICKET_SECRET_KEY", "test-key-for-encryption")
     monkeypatch.setenv("SPLITTICKET_ALLOWED_ORIGINS", "*")
     monkeypatch.delenv("SPLITTICKET_SIGNUP_KEY", raising=False)
     monkeypatch.delenv("TRICOUNT_RELAY_KEY", raising=False)
@@ -115,6 +114,24 @@ def other_device(client: TestClient) -> dict[str, str]:
     """A second device, to check it sees nothing that is none of its business."""
     response = client.post("/v1/devices")
     return {"authorization": f"Bearer {response.json()['token']}"}
+
+
+# What a real client sends instead of a password: one branch of a derivation
+# whose other branch — the one that unlocks the Gemini key — stays in the
+# browser. From the server's point of view it is just an opaque string.
+CREDENTIALS = {
+    "email": "ziroles@example.com",
+    "proof": "kR3v" + "x" * 40,
+    "kdfSalt": "0123456789abcdef0123456789abcdef",
+}
+
+
+@pytest.fixture
+def account(client: TestClient, device: dict[str, str]) -> dict[str, str]:
+    """A device attached to an account — the only owner allowed to store a key."""
+    response = client.post("/v1/accounts", json=CREDENTIALS, headers=device)
+    assert response.status_code == 201, response.text
+    return device
 
 
 @pytest.fixture

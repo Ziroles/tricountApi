@@ -38,11 +38,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """
     config.ensure_directories()
     db.connect()
-    if config.SECRET_KEY == "":
-        logger.warning(
-            "SPLITTICKET_SECRET_KEY is missing: users will not be able to save their "
-            "Gemini key (we refuse to write it in the clear)."
-        )
     if config.GEMINI_API_KEY == "":
         logger.info("No instance Gemini key: every user will bring their own.")
     if config.SIGNUP_KEY == "":
@@ -102,7 +97,6 @@ def health() -> dict[str, object]:
         "contractVersion": config.CONTRACT_VERSION,
         "serverHasGeminiKey": config.GEMINI_API_KEY != "",
         "signupKeyRequired": config.SIGNUP_KEY != "",
-        "canStoreUserKeys": config.SECRET_KEY != "",
         "imageRetentionDays": config.IMAGE_RETENTION_DAYS,
     }
 

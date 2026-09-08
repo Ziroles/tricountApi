@@ -1,27 +1,29 @@
+# L'API est un service autonome : elle ne connaît pas le front et n'a aucun
+# réseau, volume ni conteneur en commun avec lui. Le front l'atteint depuis le
+# navigateur, par son URL publique — d'où CORS (SPLITTICKET_ALLOWED_ORIGINS)
+# comme seul point de contact entre les deux.
 services:
   splitticket-api:
     build: .
     container_name: splitticket-api
     restart: unless-stopped
     ports:
-      - "${SPLITTICKET_PORT:-8787}:8787"
+      # Port publié sur l'hôte. Le port d'écoute dans le conteneur reste 8787.
+      - "${SPLITTICKET_API_PORT:-8787}:8787"
     volumes:
       # SQLite database, receipt photos, Tricount device credentials.
       # Losing this volume means losing the groups and the receipts.
       - splitticket-data:/data
+    # SPLITTICKET_SIGNUP_KEY, GEMINI_API_KEY, SPLITTICKET_ALLOWED_ORIGINS… :
+    # tout vient de .env (cf. .env.example).
+    env_file:
+      - .env
     environment:
-      - TRICOUNT_RELAY_HOST=0.0.0.0
-      - TRICOUNT_RELAY_PORT=8787
-      - TRICOUNT_RELAY_KEY=${TRICOUNT_RELAY_KEY:-}
-    networks:
-      - splitticket
-
-networks:
-  # Réseau partagé avec le front (projet triCountHelper) : c'est lui qui donne
-  # à nginx un nom « tricount-api » à résoudre. Nom fixe, pour qu'il ne dépende
-  # pas du nom du dossier du projet Compose.
-  splitticket:
-    name: splitticket
+      # Ces trois-là ne se règlent pas depuis .env : ils décrivent le conteneur
+      # lui-même, pas le déploiement.
+      - SPLITTICKET_HOST=0.0.0.0
+      - SPLITTICKET_PORT=8787
+      - SPLITTICKET_DATA_DIR=/data
 
 volumes:
   splitticket-data:

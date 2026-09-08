@@ -32,23 +32,54 @@ class DeviceCreated(BaseModel):
     token: str
 
 
-class AccountCredentials(BaseModel):
+class SaltRequest(BaseModel):
+    """Asked before logging in: the client cannot derive anything without it."""
+
     email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=8, max_length=256)
+
+
+class SaltResponse(BaseModel):
+    kdfSalt: str
+
+
+class AccountLogin(BaseModel):
+    """
+    `proof` is NOT the password.
+
+    The client derives `master = PBKDF2(password, kdfSalt)` and sends only one
+    branch of it. The other branch never leaves the browser and is what unlocks
+    the Gemini key. The server therefore cannot decrypt what it stores, even
+    while a user logs in — which is the entire property we are buying here.
+
+    Server-side, `proof` is treated exactly as a password was: hashed with
+    PBKDF2 before storage. Nothing in `auth.py` had to change.
+    """
+
+    email: str = Field(min_length=3, max_length=320)
+    proof: str = Field(min_length=32, max_length=256)
+
+
+class AccountCreate(AccountLogin):
+    # Drawn by the client, stored as-is. Public: it only has to be unique.
+    kdfSalt: str = Field(min_length=16, max_length=128)
 
 
 class OwnerSettings(BaseModel):
-    """The Gemini key never appears here: only enough to recognise it."""
+    """
+    The Gemini key travels as a blob the server cannot read.
 
-    hasGeminiKey: bool
-    geminiKeyHint: str | None = None
+    There is no `hint` field any more: the client decrypts, and computes its own
+    preview. We have nothing to preview.
+    """
+
+    geminiKeyBlob: str | None = None
     serverHasGeminiKey: bool
     geminiModel: str
 
 
 class SettingsUpdate(BaseModel):
-    # None = leave untouched; "" = clear the saved key.
-    geminiApiKey: str | None = None
+    # None = leave untouched; "" = clear the stored blob.
+    geminiKeyBlob: str | None = Field(default=None, max_length=4096)
     geminiModel: str | None = None
 
 
@@ -166,6 +197,16 @@ class ReceiptSummary(BaseModel):
     version: int
     createdAt: str
     updatedAt: str
+
+
+class ExtractionSubmit(BaseModel):
+    """
+    Raw model output, produced by the browser that called Gemini with the user's
+    own key. Untrusted by construction — it was already untrusted when the
+    server made the call itself, so `normalize_extraction` needs no change.
+    """
+
+    rawText: str = Field(min_length=1, max_length=500_000)
 
 
 class ReceiptWrite(ReceiptDocument):
