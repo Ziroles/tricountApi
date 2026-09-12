@@ -98,6 +98,8 @@ def health() -> dict[str, object]:
         "serverHasGeminiKey": config.GEMINI_API_KEY != "",
         "signupKeyRequired": config.SIGNUP_KEY != "",
         "imageRetentionDays": config.IMAGE_RETENTION_DAYS,
+        "commitSha": config.APP_COMMIT_SHA,
+        "commitMessage": config.APP_COMMIT_MESSAGE,
     }
 
 
