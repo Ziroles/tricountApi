@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from .. import auth, config, db, tricount_client
 from ..extraction import gemini
 from ..models import (
+    ExtractionSubmit,
     PushExpenseRequest,
     PushExpenseResponse,
     Receipt,
@@ -34,7 +35,7 @@ from ..models import (
     ReceiptWrite,
 )
 from .groups import require_access
-from .identity import gemini_key_for, model_for
+from .identity import model_for
 
 logger = logging.getLogger("splitticket.receipts")
 
@@ -322,8 +323,11 @@ def scan_receipt(receipt_id: str, owner: auth.Owner = Depends(auth.current_owner
         )
 
     try:
+        # The instance's own key: a user with a personal key never reaches this
+        # route — their browser calls Gemini and posts the result to
+        # `/extraction` below, so this server never sees that key.
         result = gemini.extract(
-            blob.read_bytes(), record["mime"], gemini_key_for(owner), model_for(owner)
+            blob.read_bytes(), record["mime"], config.GEMINI_API_KEY, model_for(owner)
         )
     except gemini.ExtractionError as error:
         raise HTTPException(
@@ -331,6 +335,33 @@ def scan_receipt(receipt_id: str, owner: auth.Owner = Depends(auth.current_owner
             detail={"code": error.code, "reason": error.reason, "retryable": error.retryable},
         ) from error
 
+    return _apply_extraction(row, result)
+
+
+@router.post("/receipts/{receipt_id}/extraction", response_model=Receipt)
+def submit_extraction(
+    receipt_id: str, body: ExtractionSubmit, owner: auth.Owner = Depends(auth.current_owner)
+) -> Receipt:
+    """
+    Result of a reading the **browser** performed, with the user's own key.
+
+    The server never saw that key and never will. What arrives here is raw model
+    output, which was already untrusted when we produced it ourselves: it goes
+    through exactly the same sanitising as `/scan`.
+    """
+    row = _fetch(receipt_id, owner)
+    try:
+        result = gemini.parse_model_output(body.rawText)
+    except gemini.ExtractionError as error:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": error.code, "reason": error.reason, "retryable": error.retryable},
+        ) from error
+    return _apply_extraction(row, result)
+
+
+def _apply_extraction(row, result) -> Receipt:
+    """Write a reading onto the receipt, whoever called the model."""
     document = db.loads(row["document"], {})
     document["lines"] = [
         {

@@ -31,11 +31,6 @@ SIGNUP_KEY = (
     os.environ.get("SPLITTICKET_SIGNUP_KEY") or os.environ.get("TRICOUNT_RELAY_KEY") or ""
 ).strip()
 
-# Key used to encrypt users' Gemini keys at rest. Without it we refuse to store
-# one: better a service that says no than a service that writes someone else's
-# key to disk in the clear.
-SECRET_KEY = (os.environ.get("SPLITTICKET_SECRET_KEY") or "").strip()
-
 # ── Gemini ────────────────────────────────────────────────────────────────────
 
 # Instance fallback key. Empty = every user brings their own.

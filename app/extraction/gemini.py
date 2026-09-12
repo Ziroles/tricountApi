@@ -177,6 +177,18 @@ def extract(image: bytes, mime_type: str, api_key: str, model: str) -> Extractio
         if text is None:
             raise _wrap(last_error or RuntimeError("no attempt made"))
 
+    return parse_model_output(text)
+
+
+def parse_model_output(text: str) -> ExtractionResult:
+    """
+    Raw model output → sanitised extraction.
+
+    Split out from `extract` because the call and the parsing no longer happen
+    in the same place: a user with their own Gemini key has their **browser**
+    make the call, and posts the raw text back here. The text is untrusted
+    either way — it always was — so the same path handles both.
+    """
     if text.strip() == "":
         raise ExtractionError("The receipt could not be read from this photo.", retryable=True)
 

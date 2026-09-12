@@ -45,9 +45,7 @@ jobs:
 
       - name: Check that the service starts and responds
         run: |
-          docker run -d --name ci-api -p 8787:8787 \
-            -e SPLITTICKET_SECRET_KEY=clef-de-verification-ci \
-            splitticket-api:ci
+          docker run -d --name ci-api -p 8787:8787 splitticket-api:ci
           for attempt in $(seq 1 30); do
             if curl -sf http://127.0.0.1:8787/health > /dev/null; then
               curl -s http://127.0.0.1:8787/health

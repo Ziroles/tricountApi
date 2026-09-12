@@ -50,27 +50,26 @@ Built on FastAPI and SQLite. The photos live on a volume, so does the database.
    cp .env.example .env
    ```
 
-2. **Generate the encryption key** — it protects users' Gemini keys at rest. Without it, the
-   service refuses to store one rather than write it in the clear:
-   ```bash
-   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-   ```
-   Copy it into `.env` under `SPLITTICKET_SECRET_KEY`.
-
-3. **Start**:
+2. **Start**:
    ```bash
    docker compose up -d
    docker compose logs -f
    ```
-   The service listens on `http://localhost:8787`. `GET /health` says what it can do, and
-   `/docs` exposes the generated OpenAPI documentation.
+   The service listens on `http://localhost:8787` (`SPLITTICKET_API_PORT` to publish it
+   elsewhere). `GET /health` says what it can do, and `/docs` exposes the generated OpenAPI
+   documentation.
+
+> **The API is deployed on its own.** It shares no network, volume or container with the PWA:
+> the two are separate services, and the browser is what puts them in touch. The only thing to
+> declare is the front's origin in `SPLITTICKET_ALLOWED_ORIGINS`, so that CORS lets it call.
+> Conversely, the front is built with `VITE_API_URL` pointing at this API's public URL. Nothing
+> else links them.
 
 ### Without Docker
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export SPLITTICKET_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 export SPLITTICKET_DATA_DIR=./data
 uvicorn app.main:app --host 127.0.0.1 --port 8787
 ```
@@ -81,19 +80,25 @@ uvicorn app.main:app --host 127.0.0.1 --port 8787
 
 | Variable | Role | Default |
 |---|---|---|
-| `SPLITTICKET_SECRET_KEY` | **Required** to store users' Gemini keys (encryption at rest). | *none* |
 | `SPLITTICKET_SIGNUP_KEY` | Optional. Required to enrol a **new** device (`X-Signup-Key`): closes off a public instance without managing accounts. | empty (open) |
-| `GEMINI_API_KEY` | Optional. Fallback key for when a user has none of their own. Empty = everyone brings their own, and the app says so. | empty |
+| `GEMINI_API_KEY` | Optional. Fallback key for users with none of their own — **the only Gemini key this server ever holds**. Empty = everyone brings their own, and the app says so. | empty |
 | `GEMINI_MODEL` | Default model. | `gemini-2.5-flash` |
 | `SPLITTICKET_DATA_DIR` | Database, photos, Tricount credentials. | `/data` |
 | `SPLITTICKET_ALLOWED_ORIGINS` | Allowed origins, comma-separated. | `*` |
 | `SPLITTICKET_IMAGE_RETENTION_DAYS` | Purge photos after N days. `0` = never. | `90` |
-| `SPLITTICKET_HOST` / `SPLITTICKET_PORT` | Listen address. | `127.0.0.1` / `8787` |
+| `SPLITTICKET_HOST` / `SPLITTICKET_PORT` | Listen address. Set by Compose (`0.0.0.0:8787`) under Docker. | `127.0.0.1` / `8787` |
+| `SPLITTICKET_API_PORT` | Compose only: host port the API is published on. | `8787` |
 | `TRICOUNT_CREDENTIALS_PATH` | Tricount device credentials. | `$DATA_DIR/.tricount-credentials.json` |
 
 `*` as an allowed origin is fine for a personal deployment: authentication is a **bearer
-token**, not a cookie, so there is no CSRF to worry about. Restricting it is still preferable in
-public.
+token**, not a cookie, so there is no CSRF to worry about. Restricting it to the front's origin
+is still preferable in public — it is the one setting that has to know the PWA exists.
+
+`SPLITTICKET_SECRET_KEY` no longer exists either. A user's Gemini key is encrypted **in their
+browser**, with a key derived from their password that never reaches this server; what is stored
+here is a blob we cannot read. There is consequently nothing to rotate, and no way for the
+service — or for anyone holding a copy of its database — to recover someone's key. A forgotten
+password loses it for good, which the app says at the moment the key is saved.
 
 `SPLITTICKET_RELAY_KEY` no longer exists; `TRICOUNT_RELAY_KEY` is still read as a fallback for
 `SPLITTICKET_SIGNUP_KEY`, so as not to break an existing deployment.

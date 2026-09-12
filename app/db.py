@@ -14,6 +14,7 @@ tables would require dozens of patch endpoints for no gain on reads.
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -120,6 +121,34 @@ migration(
 )
 
 
+# ── v2 — the server stops holding a readable Gemini key ───────────────────────
+
+migration(
+    """
+    -- The Gemini key is now encrypted in the browser, with a key derived from
+    -- the user's password that never reaches us. What we keep is an opaque
+    -- blob: we cannot read it, and we could not hand it back to anyone but its
+    -- owner. Losing the password loses the key — that is the point, not a bug.
+    ALTER TABLE owner_settings DROP COLUMN gemini_api_key_encrypted;
+    ALTER TABLE owner_settings DROP COLUMN gemini_key_hint;
+    ALTER TABLE owner_settings ADD COLUMN gemini_key_blob TEXT;
+
+    -- Public salt for the client-side derivation. Not a secret: it only has to
+    -- be unique per account, so that the same password on two instances does
+    -- not yield the same key.
+    ALTER TABLE account ADD COLUMN kdf_salt TEXT;
+
+    -- Instance-scoped values generated on first use. Holds the pepper that
+    -- makes an unknown e-mail return a plausible salt rather than a 404 —
+    -- otherwise the login flow would answer "does this account exist?".
+    CREATE TABLE instance (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    """
+)
+
+
 _connection: sqlite3.Connection | None = None
 
 
@@ -190,3 +219,20 @@ def loads(raw: str | None, fallback: Any) -> Any:
 
 def dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def instance_value(key: str) -> str:
+    """
+    Instance-scoped constant, generated on first use and kept afterwards.
+
+    Used for values that must be stable across restarts but that nobody should
+    have to configure — a missing one would only be noticed the day it silently
+    changed behaviour.
+    """
+    row = query_one("SELECT value FROM instance WHERE key = ?", (key,))
+    if row is not None:
+        return row["value"]
+    value = secrets.token_hex(32)
+    # Another worker may have won the race: keep whatever landed first.
+    execute("INSERT OR IGNORE INTO instance (key, value) VALUES (?, ?)", (key, value))
+    return query_one("SELECT value FROM instance WHERE key = ?", (key,))["value"]
