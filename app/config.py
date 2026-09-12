@@ -73,10 +73,27 @@ PURGE_INTERVAL_SECONDS = int(os.environ.get("SPLITTICKET_PURGE_INTERVAL_SECONDS"
 # Bump it on every breaking change to the /v1 surface.
 CONTRACT_VERSION = "1"
 
-# ── Version ───────────────────────────────────────────────────────────────
-# Commit SHA and message, injected at build time by the Dockerfile.
-APP_COMMIT_SHA = os.environ.get("APP_COMMIT_SHA") or "unknown"
-APP_COMMIT_MESSAGE = os.environ.get("APP_COMMIT_MESSAGE") or "unknown"
+# ── Version ───────────────────────────────────────────────────────────────────
+
+# Commit the running code was built from, announced by /health. The Dockerfile
+# writes it into `revision/` at build time; APP_COMMIT_SHA / APP_COMMIT_MESSAGE
+# take precedence, for a run outside Docker.
+REVISION_DIR = Path(__file__).resolve().parent.parent / "revision"
+
+
+def _revision(name: str, variable: str) -> str:
+    from_env = (os.environ.get(variable) or "").strip()
+    if from_env:
+        return from_env
+    try:
+        return (REVISION_DIR / name).read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+APP_COMMIT_SHA = _revision("sha", "APP_COMMIT_SHA")
+APP_COMMIT_MESSAGE = _revision("message", "APP_COMMIT_MESSAGE")
+
 
 def ensure_directories() -> None:
     """Create the data tree. Idempotent, called at startup."""
