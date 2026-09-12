@@ -73,6 +73,10 @@ PURGE_INTERVAL_SECONDS = int(os.environ.get("SPLITTICKET_PURGE_INTERVAL_SECONDS"
 # Bump it on every breaking change to the /v1 surface.
 CONTRACT_VERSION = "1"
 
+# ── Version ───────────────────────────────────────────────────────────────
+# Commit SHA and message, injected at build time by the Dockerfile.
+APP_COMMIT_SHA = os.environ.get("APP_COMMIT_SHA") or "unknown"
+APP_COMMIT_MESSAGE = os.environ.get("APP_COMMIT_MESSAGE") or "unknown"
 
 def ensure_directories() -> None:
     """Create the data tree. Idempotent, called at startup."""
