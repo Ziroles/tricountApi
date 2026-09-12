@@ -21,14 +21,3 @@ def hash_token(token: str) -> str:
     copy of the database must not be enough to impersonate a device.
     """
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def hint(secret: str) -> str:
-    """
-    Displayable preview of a key: "AIza…7fQ". Kept for values the server does
-    legitimately hold — the instance's own fallback key — never for a user's.
-    """
-    trimmed = secret.strip()
-    if len(trimmed) <= 8:
-        return "…"
-    return f"{trimmed[:4]}…{trimmed[-3:]}"

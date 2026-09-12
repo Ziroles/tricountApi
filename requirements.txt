@@ -12,7 +12,4 @@ pydantic==2.13.5
 google-genai==2.22.0
 
 # Unofficial Tricount client, reverse-engineered from the Android app.
-# Also brings in `cryptography`, which we use to encrypt at rest the Gemini keys
-# users entrust to us.
 tricount-api==0.1.2
-cryptography==50.0.1
